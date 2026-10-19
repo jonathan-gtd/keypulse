@@ -1,0 +1,39 @@
+# keypulse configuration — %APPDATA%\keypulse\config.yaml
+# Every setting is optional: without this file, keypulse reports once a
+# minute to a Telegraf socket_listener on udp://127.0.0.1:8094.
+
+# How often counters are sent. Reports are aligned on the clock.
+interval: 60s
+
+# Value of the "host" tag. Defaults to the computer name, in lower case.
+# host: my-pc
+
+# Prefix of the measurement names: keypulse, keypulse_keys, keypulse_heatmap.
+measurement: keypulse
+
+# Count every key separately (keyboard heatmap). Off by default: per-key
+# counts are more revealing than totals.
+per_key: false
+
+# Attribute keys, clicks and mouse travel to the application in the foreground.
+per_app: true
+
+# Mouse sensor resolution. When set, the distance is also reported in meters.
+mouse_dpi: 0
+
+# Where the cursor goes and where you click, on a grid of cell_size pixels.
+heatmap:
+  enabled: true
+  cell_size: 40
+
+output:
+  # udp://127.0.0.1:8094                     Telegraf inputs.socket_listener
+  # http://127.0.0.1:8186/write              Telegraf inputs.influxdb_listener
+  # https://influx:8086/api/v2/write?org=o&bucket=b&precision=ns   InfluxDB 2 (set token)
+  url: udp://127.0.0.1:8094
+  token: ""
+  # HTTP only: reports kept in memory while the server is unreachable.
+  max_buffer: 1440
+
+# Defaults to %LOCALAPPDATA%\keypulse\keypulse.log
+# log_file: ""
