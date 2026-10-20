@@ -4,7 +4,18 @@
 
 - `keypulse-net`: a separate, optional Windows service reporting **bytes sent and received per application**, read from the kernel network provider through a minimal Event Tracing consumer written for the purpose. Only the process id and the byte count are read from each event — never an address, a port or any packet content. See [docs/network.md](docs/network.md).
 
-  Not released yet: it needs administrator rights to open a trace session and has not been run on real hardware, so there is no binary in the releases.
+  Not released yet: it needs administrator rights to open a trace session and has not been run on real hardware, so there is no binary in the releases. `keypulse-net check` verifies the Windows structure layouts without elevation.
+
+## [0.4.0] - 2026-10-20
+
+Added
+- **Key categories**: presses split into letters, digits, punctuation, navigation, function, modifier, numpad and media.
+- **Hand balance**: how much of your typing each half of the keyboard takes. Read from the physical scan code, so it is the same whatever the layout.
+- **Typing rhythm**: a histogram of the gap between two presses (`<50ms` … `>1s`). The gaps are counted; the keys they fell between are not.
+- **Peak cursor speed**, in metres per second.
+- **Pointer-held seconds**: time with the pointer confined to part of the screen, which is what a game does when it takes the mouse — a decent measure of time spent in one.
+- The status page shows the hand split, the peak cursor speed and the pointer-held time.
+- New measurements `keypulse_keycat` and `keypulse_rhythm`; `keypulse_session` gains `hand_left`, `hand_right`, `captured_s` and `cursor_peak_mps`.
 
 ## [0.3.0] - 2026-10-20
 

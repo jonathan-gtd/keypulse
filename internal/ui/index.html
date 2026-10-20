@@ -74,6 +74,10 @@ const dur = s => {
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
   return h ? `${h} h ${String(m).padStart(2, "0")}` : m ? `${m} min` : `${s} s`;
 };
+const hands = d => {
+  const l = d.hand_left || 0, r = d.hand_right || 0;
+  return l + r ? `${Math.round(l / (l + r) * 100)}/${Math.round(r / (l + r) * 100)}` : "—";
+};
 const tile = (k, v, unit) =>
   `<div class="card"><div class="k">${k}</div><div class="v">${v}${unit ? `<small>${unit}</small>` : ""}</div></div>`;
 
@@ -102,7 +106,10 @@ async function refresh() {
     tile("Wheel", n(d.wheel_notches), "notches"),
     tile("Active", dur(d.active_s)),
     tile("Idle", dur(d.idle_s)),
-    tile("Peak", n(d.typing_peak_1s), "keys/s"),
+    tile("Peak typing", n(d.typing_peak_1s), "keys/s"),
+    tile("Peak cursor", (d.cursor_peak_mps || 0).toFixed(2), "m/s"),
+    tile("Hands L/R", hands(d)),
+    tile("Pointer held", dur(d.captured_s)),
     tile("App switches", n(d.app_switches)),
     tile("Clipboard", n(d.clipboard_copies)),
     tile("Points sent", n(d.sent_points)),

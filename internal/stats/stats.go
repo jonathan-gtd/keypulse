@@ -50,6 +50,68 @@ type Cell struct {
 	X, Y int32
 }
 
+// Category groups keys by what they are for. It says nothing about which
+// key was pressed beyond its kind.
+type Category uint8
+
+const (
+	CatLetter Category = iota
+	CatDigit
+	CatPunctuation
+	CatNavigation
+	CatFunction
+	CatModifier
+	CatNumpad
+	CatMedia
+	CatOther
+	NumCategories
+)
+
+// CategoryNames are the tag values used in reports, indexed by Category.
+var CategoryNames = [NumCategories]string{
+	"letter", "digit", "punctuation", "navigation",
+	"function", "modifier", "numpad", "media", "other",
+}
+
+// Hand is the side of the keyboard a key sits on, from its physical
+// position, so it does not depend on the keyboard layout.
+type Hand uint8
+
+const (
+	HandNone Hand = iota // keys that belong to neither side
+	HandLeft
+	HandRight
+)
+
+// NumRhythm is the number of buckets in the typing-rhythm histogram.
+const NumRhythm = 6
+
+// RhythmNames label the time between two key presses. Only the gaps are
+// counted, never which keys they were between.
+var RhythmNames = [NumRhythm]string{"<50ms", "50-100ms", "100-200ms", "200-500ms", "500ms-1s", ">1s"}
+
+// rhythmBucket places a gap between two key presses.
+func rhythmBucket(d time.Duration) int {
+	switch {
+	case d < 50*time.Millisecond:
+		return 0
+	case d < 100*time.Millisecond:
+		return 1
+	case d < 200*time.Millisecond:
+		return 2
+	case d < 500*time.Millisecond:
+		return 3
+	case d < time.Second:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// rhythmMaxGap is the longest gap still counted as typing: past it the
+// person simply stopped, which says nothing about their rhythm.
+const rhythmMaxGap = 10 * time.Second
+
 // App holds what happened while one application was in the foreground.
 type App struct {
 	Keys   uint64
@@ -97,14 +159,21 @@ type Snapshot struct {
 	Shortcuts  map[string]uint64 // by combo name, e.g. "CTRL+C"
 	Heat       map[Cell]uint64   // nil unless the heatmap is on
 
+	Categories [NumCategories]uint64 // key presses by kind of key
+	Rhythm     [NumRhythm]uint64     // gaps between two key presses
+
 	// Session-wide, not tied to one application.
-	TypingPeak1s    uint64 // most keys in any one-second window
-	TypingPeak10s   uint64 // most keys in any ten-second window
-	IdleSeconds     uint64 // seconds with no input at all
-	AppSwitches     uint64 // foreground changes
-	ClipboardCopies uint64 // clipboard updates (content never read)
-	Locks           uint64 // session locks
-	Unlocks         uint64 // session unlocks
+	HandLeft        uint64  // keys struck on the left half of the keyboard
+	HandRight       uint64  // ... and on the right half
+	CursorPeak      float64 // fastest the cursor moved, in meters per second
+	CapturedSeconds uint64  // seconds with the pointer confined, i.e. in a game
+	TypingPeak1s    uint64  // most keys in any one-second window
+	TypingPeak10s   uint64  // most keys in any ten-second window
+	IdleSeconds     uint64  // seconds with no input at all
+	AppSwitches     uint64  // foreground changes
+	ClipboardCopies uint64  // clipboard updates (content never read)
+	Locks           uint64  // session locks
+	Unlocks         uint64  // session unlocks
 }
 
 // Empty reports whether nothing worth sending happened during the period.
@@ -149,6 +218,14 @@ type Counter struct {
 	locks     uint64
 	unlocks   uint64
 
+	categories [NumCategories]uint64
+	rhythm     [NumRhythm]uint64
+	handLeft   uint64
+	handRight  uint64
+	lastKeyAt  time.Time
+	cursorPeak float64
+	captured   uint64
+
 	// Typing peaks, on tumbling windows.
 	sec1Start, sec1Count   uint64
 	sec10Start, sec10Count uint64
@@ -179,6 +256,11 @@ func (c *Counter) reset(start time.Time) {
 	c.switches, c.clipboard, c.locks, c.unlocks = 0, 0, 0, 0
 	c.peak1s, c.peak10s, c.idle = 0, 0, 0
 	c.sec1Count, c.sec10Count = 0, 0
+	c.categories = [NumCategories]uint64{}
+	c.rhythm = [NumRhythm]uint64{}
+	c.handLeft, c.handRight = 0, 0
+	c.cursorPeak = 0
+	c.captured = 0
 	if c.perKey {
 		c.keys = make(map[string]uint64)
 	}
@@ -225,16 +307,47 @@ func (c *Counter) SetApp(name string) {
 	}
 }
 
-// Key records one key press. perKey adds it to the by-name map, and the
-// press feeds the typing-speed peaks.
-func (c *Counter) Key(name string) {
+// Key records one key press: its kind, which side of the keyboard it sits
+// on, and — only when per-key counting is on — its name. The gap since the
+// previous press feeds the rhythm histogram; the gap itself is counted, not
+// the pair of keys it separated.
+func (c *Counter) Key(name string, cat Category, hand Hand) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.acc().keys++
 	if c.perKey {
 		c.keys[name]++
 	}
+	if cat < NumCategories {
+		c.categories[cat]++
+	}
+	switch hand {
+	case HandLeft:
+		c.handLeft++
+	case HandRight:
+		c.handRight++
+	}
+	now := c.now()
+	if !c.lastKeyAt.IsZero() {
+		if gap := now.Sub(c.lastKeyAt); gap >= 0 && gap <= rhythmMaxGap {
+			c.rhythm[rhythmBucket(gap)]++
+		}
+	}
+	c.lastKeyAt = now
 	c.bumpPeaks()
+}
+
+// CursorSpeed records how fast the cursor just moved, in meters per second,
+// keeping the fastest of the period.
+func (c *Counter) CursorSpeed(mps float64) {
+	if mps <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if mps > c.cursorPeak {
+		c.cursorPeak = mps
+	}
 }
 
 func (c *Counter) bumpPeaks() {
@@ -366,13 +479,18 @@ func (c *Counter) Lock()   { c.mu.Lock(); c.locks++; c.mu.Unlock() }
 func (c *Counter) Unlock() { c.mu.Lock(); c.unlocks++; c.mu.Unlock() }
 
 // Tick is called once a second: it adds a foreground second to the current
-// application and, if nothing was pressed in the past second, an idle second.
-func (c *Counter) Tick() {
+// application and, if nothing was pressed in the past second, an idle
+// second. captured says whether the pointer was confined to part of the
+// screen, which is what a game does when it takes the mouse.
+func (c *Counter) Tick(captured bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.accRaw().foreground++
 	if !c.inputThisSecond {
 		c.idle++
+	}
+	if captured {
+		c.captured++
 	}
 	c.inputThisSecond = false
 }
@@ -386,6 +504,9 @@ func (c *Counter) Snapshot(end time.Time) Snapshot {
 		Start: c.start, End: end, Keys: c.keys, Shortcuts: c.shortcuts, Heat: c.cells,
 		TypingPeak1s: c.peak1s, TypingPeak10s: c.peak10s, IdleSeconds: c.idle,
 		AppSwitches: c.switches, ClipboardCopies: c.clipboard, Locks: c.locks, Unlocks: c.unlocks,
+		Categories: c.categories, Rhythm: c.rhythm,
+		HandLeft: c.handLeft, HandRight: c.handRight,
+		CursorPeak: c.cursorPeak, CapturedSeconds: c.captured,
 	}
 	if len(c.apps) > 0 {
 		s.Apps = make(map[string]App, len(c.apps))
@@ -427,6 +548,10 @@ type Session struct {
 	ClipboardCopies uint64
 	AppSwitches     uint64
 	TypingPeak1s    uint64
+	HandLeft        uint64
+	HandRight       uint64
+	CursorPeak      float64
+	CapturedSeconds uint64
 	TopApps         []AppTotal
 }
 
@@ -467,8 +592,14 @@ func (s *Session) Add(snap Snapshot) {
 	s.IdleSeconds += snap.IdleSeconds
 	s.ClipboardCopies += snap.ClipboardCopies
 	s.AppSwitches += snap.AppSwitches
+	s.HandLeft += snap.HandLeft
+	s.HandRight += snap.HandRight
+	s.CapturedSeconds += snap.CapturedSeconds
 	if snap.TypingPeak1s > s.TypingPeak1s {
 		s.TypingPeak1s = snap.TypingPeak1s
+	}
+	if snap.CursorPeak > s.CursorPeak {
+		s.CursorPeak = snap.CursorPeak
 	}
 	s.TopApps = s.TopApps[:0]
 	for _, t := range byApp {

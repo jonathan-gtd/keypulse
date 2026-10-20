@@ -88,6 +88,8 @@ func (a *agent) status() ui.Status {
 		ActiveSeconds: a.session.ActiveSeconds, IdleSeconds: a.session.IdleSeconds,
 		Shortcuts: a.session.Shortcuts, ClipboardCopies: a.session.ClipboardCopies,
 		AppSwitches: a.session.AppSwitches, TypingPeak1s: a.session.TypingPeak1s,
+		HandLeft: a.session.HandLeft, HandRight: a.session.HandRight,
+		CursorPeak: a.session.CursorPeak, CapturedSeconds: a.session.CapturedSeconds,
 	}
 	if !a.last.IsZero() {
 		st.LastSend = a.last.Format("15:04:05")

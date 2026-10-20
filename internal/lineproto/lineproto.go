@@ -78,7 +78,38 @@ func Encode(o Options, s stats.Snapshot) []byte {
 	writeInt(&b, "clipboard_copies", s.ClipboardCopies, false)
 	writeInt(&b, "locks", s.Locks, false)
 	writeInt(&b, "unlocks", s.Unlocks, false)
+	writeInt(&b, "hand_left", s.HandLeft, false)
+	writeInt(&b, "hand_right", s.HandRight, false)
+	writeInt(&b, "captured_s", s.CapturedSeconds, false)
+	writeFloat(&b, "cursor_peak_mps", round(s.CursorPeak, 3))
 	b.WriteString(ts)
+
+	for i, n := range s.Categories {
+		if n == 0 {
+			continue
+		}
+		b.WriteString(escapeMeasurement(m + "_keycat"))
+		b.WriteString(host)
+		b.WriteString(",category=")
+		b.WriteString(stats.CategoryNames[i])
+		b.WriteByte(' ')
+		writeInt(&b, "count", n, true)
+		b.WriteString(ts)
+	}
+
+	for i, n := range s.Rhythm {
+		if n == 0 {
+			continue
+		}
+		b.WriteString(escapeMeasurement(m + "_rhythm"))
+		b.WriteString(host)
+		b.WriteString(",bucket=")
+		b.WriteString(escapeTag(stats.RhythmNames[i]))
+		b.WriteByte(' ')
+		writeInt(&b, "count", n, true)
+		writeInt(&b, "rank", uint64(i), false)
+		b.WriteString(ts)
+	}
 
 	for _, key := range sortedKeys(s.Keys) {
 		b.WriteString(escapeMeasurement(m + "_keys"))

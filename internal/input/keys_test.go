@@ -1,6 +1,10 @@
 package input
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jonathan-gtd/keypulse/internal/stats"
+)
 
 func TestKeyID(t *testing.T) {
 	tests := []struct {
@@ -25,6 +29,61 @@ func TestKeyID(t *testing.T) {
 	for _, tt := range tests {
 		if got := keyNames[keyID(tt.vk, tt.scan, tt.e0)]; got != tt.want {
 			t.Errorf("keyNames[keyID(%#x, %#x, %v)] = %q, want %q", tt.vk, tt.scan, tt.e0, got, tt.want)
+		}
+	}
+}
+
+func TestCategory(t *testing.T) {
+	tests := map[int]stats.Category{
+		'A': stats.CatLetter, 'Z': stats.CatLetter,
+		'0': stats.CatDigit, '9': stats.CatDigit,
+		0x20: stats.CatPunctuation, 0xBA: stats.CatPunctuation, 0xE2: stats.CatPunctuation,
+		0x25: stats.CatNavigation, 0x08: stats.CatNavigation, 0x0D: stats.CatNavigation,
+		0x70: stats.CatFunction, 0x87: stats.CatFunction,
+		0xA0: stats.CatModifier, 0x5B: stats.CatModifier, 0x14: stats.CatModifier,
+		0x60: stats.CatNumpad, 0x90: stats.CatNumpad, numpadEnter: stats.CatNumpad,
+		0xAF: stats.CatMedia,
+		0x07: stats.CatOther,
+	}
+	for id, want := range tests {
+		if got := category(id); got != want {
+			t.Errorf("category(%#x) = %q, want %q",
+				id, stats.CategoryNames[got], stats.CategoryNames[want])
+		}
+	}
+}
+
+func TestHandFor(t *testing.T) {
+	tests := []struct {
+		name string
+		scan uint16
+		e0   bool
+		want stats.Hand
+	}{
+		{"the key left of 1", 0x29, false, stats.HandNone},
+		{"digit 4", 0x05, false, stats.HandLeft},
+		{"digit 7", 0x08, false, stats.HandRight},
+		{"top row, left of centre", 0x11, false, stats.HandLeft},
+		{"top row, right of centre", 0x16, false, stats.HandRight},
+		{"home row, left", 0x1E, false, stats.HandLeft},
+		{"home row, right", 0x24, false, stats.HandRight},
+		{"left shift", 0x2A, false, stats.HandLeft},
+		{"right shift", 0x36, false, stats.HandRight},
+		{"left ctrl", 0x1D, false, stats.HandLeft},
+		{"right ctrl", 0x1D, true, stats.HandRight},
+		{"left alt", 0x38, false, stats.HandLeft},
+		{"right alt", 0x38, true, stats.HandRight},
+		{"enter", 0x1C, false, stats.HandRight},
+		{"numeric pad enter", 0x1C, true, stats.HandNone},
+		{"space belongs to neither", 0x39, false, stats.HandNone},
+		{"numeric pad 7", 0x47, false, stats.HandNone},
+		{"arrow key", 0x48, true, stats.HandNone},
+		{"F3", 0x3D, false, stats.HandLeft},
+		{"F9", 0x43, false, stats.HandRight},
+	}
+	for _, tt := range tests {
+		if got := handFor(tt.scan, tt.e0); got != tt.want {
+			t.Errorf("%s: handFor(%#x, %v) = %d, want %d", tt.name, tt.scan, tt.e0, got, tt.want)
 		}
 	}
 }

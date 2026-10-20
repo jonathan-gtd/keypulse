@@ -339,7 +339,7 @@ func (l *listener) wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		case cursorTimerID:
 			l.sampleCursor()
 		case tickTimerID:
-			l.c.Tick()
+			l.c.Tick(l.pointerLocked())
 		}
 		return 0
 	case wmClipboardUpdate:
@@ -403,7 +403,7 @@ func (l *listener) keyboard(k *rawKeyboard) {
 		return
 	}
 	l.down[id], l.downAt[id] = true, now
-	l.c.Key(keyNames[id])
+	l.c.Key(keyNames[id], category(id), handFor(k.makeCode, k.flags&riKeyE0 != 0))
 	if combo := shortcutName(id, func(k int) bool { return l.down[k] }); combo != "" {
 		l.c.Shortcut(combo)
 	}
@@ -488,7 +488,8 @@ func (l *listener) mouse(m *rawMouse) {
 // previous sample, converted to meters with the physical size of the monitor.
 func (l *listener) trackCursor() {
 	now := time.Now()
-	if now.Sub(l.lastTrack) < cursorTrackEvery {
+	since := now.Sub(l.lastTrack)
+	if since < cursorTrackEvery {
 		return
 	}
 	l.lastTrack = now
@@ -499,7 +500,13 @@ func (l *listener) trackCursor() {
 	}
 	if l.haveCur && p != l.curPos {
 		d := math.Hypot(float64(p.x-l.curPos.x), float64(p.y-l.curPos.y))
-		l.c.Cursor(d * l.metersPerPixel(p))
+		meters := d * l.metersPerPixel(p)
+		l.c.Cursor(meters)
+		// A gap longer than a second means the mouse was simply still in
+		// between, so the average over it is not a speed worth keeping.
+		if s := since.Seconds(); s > 0 && since <= time.Second {
+			l.c.CursorSpeed(meters / s)
+		}
 	}
 	l.curPos, l.haveCur = p, true
 }

@@ -13,10 +13,10 @@ func TestCounterSnapshot(t *testing.T) {
 	clk := &fakeClock{t: time.Unix(1000, 0)}
 	c := newCounter(true, true, clk.now)
 
-	c.Key("A") // before any SetApp: unknown
+	c.Key("A", CatLetter, HandLeft) // before any SetApp: unknown
 	c.SetApp("game.exe")
-	c.Key("A")
-	c.Key("SPACE")
+	c.Key("A", CatLetter, HandLeft)
+	c.Key("SPACE", CatPunctuation, HandNone)
 	c.KeyHold(80)
 	c.KeyHold(99999) // out of range, ignored
 	c.Shortcut("CTRL+C")
@@ -26,8 +26,8 @@ func TestCounterSnapshot(t *testing.T) {
 	c.ClickHold(120)
 	c.Click(Button(42)) // ignored
 	clk.t = clk.t.Add(1500 * time.Millisecond)
-	c.Key("B") // a second later: same ten-second window, new one-second window
-	c.Key("C")
+	c.Key("B", CatLetter, HandRight) // a second later: same ten-second window, new one-second window
+	c.Key("C", CatDigit, HandRight)
 	c.Wheel(240, false)
 	c.Wheel(-60, false)
 	c.Wheel(120, true)
@@ -37,8 +37,11 @@ func TestCounterSnapshot(t *testing.T) {
 	c.Move(-1) // ignored
 	c.Cursor(0.25)
 	c.Cursor(0.5)
-	c.Tick() // input happened this second: no idle, +1 foreground
-	c.Tick() // nothing since: +1 idle
+	c.CursorSpeed(1.0)
+	c.CursorSpeed(2.5)
+	c.CursorSpeed(0.8) // slower, so the peak stays 2.5
+	c.Tick(false)      // input happened this second: no idle, +1 foreground
+	c.Tick(true)       // nothing since: +1 idle
 	c.SetApp("")
 	c.Click(Right)
 	c.Clipboard()
@@ -78,6 +81,19 @@ func TestCounterSnapshot(t *testing.T) {
 	if s.AppSwitches != 2 || s.IdleSeconds != 1 || s.ClipboardCopies != 1 || s.Locks != 1 || s.Unlocks != 1 {
 		t.Errorf("session = %+v", s)
 	}
+	if s.Categories[CatLetter] != 3 || s.Categories[CatDigit] != 1 || s.Categories[CatPunctuation] != 1 {
+		t.Errorf("categories = %v", s.Categories)
+	}
+	if s.HandLeft != 2 || s.HandRight != 2 {
+		t.Errorf("hands = %d / %d", s.HandLeft, s.HandRight)
+	}
+	// Five keys make four gaps: three within the same instant, one of 1.5 s.
+	if s.Rhythm[0] != 3 || s.Rhythm[5] != 1 {
+		t.Errorf("rhythm = %v", s.Rhythm)
+	}
+	if s.CursorPeak != 2.5 || s.CapturedSeconds != 1 {
+		t.Errorf("peak = %v, captured = %d", s.CursorPeak, s.CapturedSeconds)
+	}
 	if s.TypingPeak1s != 3 || s.TypingPeak10s != 5 {
 		t.Errorf("peaks = %d / %d", s.TypingPeak1s, s.TypingPeak10s)
 	}
@@ -99,7 +115,7 @@ func TestCounterSnapshot(t *testing.T) {
 
 func TestCounterOptionsOff(t *testing.T) {
 	c := NewCounter(false, false)
-	c.Key("A")
+	c.Key("A", CatLetter, HandLeft)
 	c.Heat(Cell{Move, 0, 0})
 	s := c.Snapshot(time.Now())
 	if s.Keys != nil || s.Heat != nil || s.Apps[UnknownApp].Keys != 1 {

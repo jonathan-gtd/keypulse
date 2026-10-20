@@ -20,7 +20,7 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 - ⌨️ **Keys, clicks, shortcuts, wheel, mouse travel and active time**, every minute — cursor distance in real meters, no DPI to enter.
 - 🪟 **Per application** — how much you type in your editor, click in your game, and how long each one is in front.
 - 🔥 **Heatmaps** — where the cursor goes, where you click, and (opt-in) which keys you use.
-- 📈 **More than totals** — typing-speed peaks, key and click hold times, double-clicks, idle time, application switches.
+- 📈 **More than totals** — typing-speed peaks, typing rhythm, hand balance, key and click hold times, double-clicks, peak cursor speed, idle time, time with the pointer held by a game.
 - 🔔 **A tray icon and a local status page**, so it is never running invisibly.
 - 🎮 **Built not to cost a frame** — no input hook, below-normal priority, efficiency cores. [Details](#performance)
 - 🔒 **Counts only** — never what you type. [Details](#privacy)
@@ -87,7 +87,9 @@ keypulse_heatmap,host=pc,kind=click,x=31,y=17 count=4i 1760000000000000000
 | Measurement | Tags | Fields |
 |---|---|---|
 | `keypulse` | `host`, `app` | `keys`, `clicks`, `clicks_<button>`, `double_clicks`, `wheel_up/down/left/right` (notches), `mouse_distance` (sensor counts), `cursor_m` (on-screen cursor travel, meters), `mouse_m` (if `mouse_dpi` is set), `active_s`, `foreground_s`, `key_hold_ms_sum`, `key_hold_n`, `click_hold_ms_sum`, `click_hold_n` |
-| `keypulse_session` | `host` | `typing_peak_1s`, `typing_peak_10s`, `idle_s`, `app_switches`, `clipboard_copies`, `locks`, `unlocks` |
+| `keypulse_session` | `host` | `typing_peak_1s`, `typing_peak_10s`, `idle_s`, `app_switches`, `clipboard_copies`, `locks`, `unlocks`, `hand_left`, `hand_right`, `captured_s`, `cursor_peak_mps` |
+| `keypulse_keycat` | `host`, `category` | `count` — letters, digits, punctuation, navigation, function, modifier, numpad, media |
+| `keypulse_rhythm` | `host`, `bucket` | `count`, `rank` — gaps between two key presses |
 | `keypulse_keys` | `host`, `key` | `count` — only with `per_key` |
 | `keypulse_shortcuts` | `host`, `combo` | `count` — only with `shortcuts` |
 | `keypulse_heatmap` | `host`, `kind` (`move`/`click`), `x`, `y` | `count` — cells from the top-left corner of the desktop |

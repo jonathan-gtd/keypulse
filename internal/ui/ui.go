@@ -40,6 +40,10 @@ type Status struct {
 	ClipboardCopies uint64  `json:"clipboard_copies"`
 	AppSwitches     uint64  `json:"app_switches"`
 	TypingPeak1s    uint64  `json:"typing_peak_1s"`
+	HandLeft        uint64  `json:"hand_left"`
+	HandRight       uint64  `json:"hand_right"`
+	CursorPeak      float64 `json:"cursor_peak_mps"`
+	CapturedSeconds uint64  `json:"captured_s"`
 
 	Apps []AppRow `json:"apps"`
 }

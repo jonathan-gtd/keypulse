@@ -3,6 +3,8 @@ package input
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jonathan-gtd/keypulse/internal/stats"
 )
 
 // numpadEnter is a pseudo key id: Windows reports both Enter keys as VK_RETURN.
@@ -114,6 +116,87 @@ func shortcutName(id int, isDown func(int) bool) string {
 		return ""
 	}
 	return strings.Join(append(parts, keyNames[id]), "+")
+}
+
+// category groups a key by what it is for, from its virtual-key code.
+func category(id int) stats.Category {
+	if id == numpadEnter {
+		return stats.CatNumpad
+	}
+	vk := uint16(id)
+	switch {
+	case vk >= 'A' && vk <= 'Z':
+		return stats.CatLetter
+	case vk >= '0' && vk <= '9':
+		return stats.CatDigit
+	case vk >= 0x60 && vk <= 0x6F, vk == 0x90:
+		return stats.CatNumpad
+	case vk >= 0x70 && vk <= 0x87:
+		return stats.CatFunction
+	case vk >= 0xA0 && vk <= 0xA5, vk == 0x5B, vk == 0x5C, vk == 0x14:
+		return stats.CatModifier
+	case vk >= 0xAD && vk <= 0xB3:
+		return stats.CatMedia
+	case vk >= 0x21 && vk <= 0x28, vk == 0x2D, vk == 0x2E,
+		vk == 0x08, vk == 0x09, vk == 0x0D, vk == 0x1B:
+		return stats.CatNavigation
+	case vk == 0x20, vk >= 0xBA && vk <= 0xDF, vk == 0xE2:
+		// Space counts here too: it separates words rather than forming them.
+		return stats.CatPunctuation
+	}
+	return stats.CatOther
+}
+
+// Scan codes of the main block, by side of the keyboard. Scan codes are
+// physical positions, so the split holds whatever the layout is — on AZERTY
+// the key that types A sits where QWERTY has Q, and both are on the left.
+var (
+	leftScan = map[uint16]bool{
+		0x01: true, 0x02: true, 0x03: true, 0x04: true, 0x05: true, 0x06: true, // esc 1-5
+		0x0F: true, 0x10: true, 0x11: true, 0x12: true, 0x13: true, 0x14: true, // tab qwert
+		0x3A: true, 0x1E: true, 0x1F: true, 0x20: true, 0x21: true, 0x22: true, // caps asdfg
+		0x2A: true, 0x56: true, 0x2C: true, 0x2D: true, 0x2E: true, 0x2F: true, 0x30: true, // lshift <zxcvb
+		0x3B: true, 0x3C: true, 0x3D: true, 0x3E: true, 0x3F: true, 0x40: true, // F1-F6
+	}
+	rightScan = map[uint16]bool{
+		0x07: true, 0x08: true, 0x09: true, 0x0A: true, 0x0B: true, 0x0C: true, 0x0D: true, 0x0E: true,
+		0x15: true, 0x16: true, 0x17: true, 0x18: true, 0x19: true, 0x1A: true, 0x1B: true, 0x2B: true,
+		0x23: true, 0x24: true, 0x25: true, 0x26: true, 0x27: true, 0x28: true,
+		0x31: true, 0x32: true, 0x33: true, 0x34: true, 0x35: true, 0x36: true,
+		0x41: true, 0x42: true, 0x43: true, 0x44: true, 0x57: true, 0x58: true, // F7-F12
+	}
+)
+
+// handFor says which side of the keyboard a key sits on. Keys in the middle
+// or off to the side — space, the numeric pad, the navigation cluster —
+// belong to neither.
+func handFor(makeCode uint16, e0 bool) stats.Hand {
+	switch makeCode {
+	case 0x1D, 0x38: // ctrl and alt: the right-hand ones are escaped
+		if e0 {
+			return stats.HandRight
+		}
+		return stats.HandLeft
+	case 0x1C: // enter, unless it is the one on the numeric pad
+		if e0 {
+			return stats.HandNone
+		}
+		return stats.HandRight
+	case 0x5B:
+		return stats.HandLeft
+	case 0x5C, 0x5D:
+		return stats.HandRight
+	}
+	if e0 { // the navigation cluster and the media keys
+		return stats.HandNone
+	}
+	switch {
+	case leftScan[makeCode]:
+		return stats.HandLeft
+	case rightScan[makeCode]:
+		return stats.HandRight
+	}
+	return stats.HandNone
 }
 
 // keyNames is filled once so that a key press never allocates.
