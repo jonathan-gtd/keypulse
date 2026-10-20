@@ -7,6 +7,9 @@ import "errors"
 // ErrAlreadyRunning is returned by SingleInstance when another instance holds the lock.
 var ErrAlreadyRunning = errors.New("keypulse is already running")
 
+// ProcessName is not available outside Windows.
+func ProcessName(pid uint32) string { return "unknown" }
+
 // SetDPIAware is a no-op outside Windows.
 func SetDPIAware() error { return nil }
 

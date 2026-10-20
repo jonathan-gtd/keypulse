@@ -5,6 +5,8 @@ package winutil
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -55,6 +57,25 @@ func LowerPriority() error {
 		return err
 	}
 	return nil
+}
+
+// ProcessName returns the executable name of a process id, in lower case,
+// or "unknown" when the process is gone or cannot be opened.
+func ProcessName(pid uint32) string {
+	if pid == 0 {
+		return "system"
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "unknown"
+	}
+	defer windows.CloseHandle(h)
+	var buf [1024]uint16
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		return "unknown"
+	}
+	return strings.ToLower(filepath.Base(windows.UTF16ToString(buf[:size])))
 }
 
 // SingleInstance takes a session-wide lock. The returned function releases it.

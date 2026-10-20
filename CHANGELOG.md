@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- `keypulse-net`: a separate, optional Windows service reporting **bytes sent and received per application**, read from the kernel network provider through a minimal Event Tracing consumer written for the purpose. Only the process id and the byte count are read from each event — never an address, a port or any packet content. See [docs/network.md](docs/network.md).
+
+  Not released yet: it needs administrator rights to open a trace session and has not been run on real hardware, so there is no binary in the releases.
+
 ## [0.3.0] - 2026-10-20
 
 Added
