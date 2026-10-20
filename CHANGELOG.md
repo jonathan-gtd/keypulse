@@ -12,7 +12,7 @@ Added
 - The status page says whether network statistics are on.
 - Sub-commands print to the console they were launched from, although keypulse is a GUI program.
 
-Note: the collector itself has not yet run on real hardware — opening a trace session needs administrator rights. It is off until you turn it on.
+Note: off until you turn it on (the trace session needs administrator rights once). Verified working on real hardware on 2026-10-20.
 
 ## [0.4.0] - 2026-10-20
 

@@ -3,9 +3,9 @@
 keypulse can also report how many bytes each application sends and
 receives — the one WhatPulse feature that needs more than a user program.
 
-> **Status: the collector has not yet run on real hardware.** It ships in
-> the normal keypulse binary and is off until you turn it on, so nothing
-> changes until you do. Please report what you find.
+> **Verified on 2026-10-20** on an i9-14900KF / Windows 11: the per-process
+> byte counts decode correctly from the kernel network provider. It ships in
+> the normal keypulse binary and is off until you turn it on.
 
 ## Why there is a service, in one program
 
