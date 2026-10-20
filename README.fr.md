@@ -21,7 +21,8 @@ envoyés à Telegraf ou InfluxDB, affichés dans Grafana. Comme WhatPulse, sans 
 - 🪟 **Par application** — combien vous tapez dans votre éditeur, cliquez dans votre jeu, et combien de temps chacune est au premier plan.
 - 🔥 **Heatmaps** — où passe le curseur, où vous cliquez et (en option) quelles touches vous utilisez.
 - 📈 **Plus que des totaux** — pointes de frappe, rythme de frappe, équilibre des mains, durée d’appui, double-clics, vitesse de pointe du curseur, temps d’inactivité, temps avec la souris capturée par un jeu.
-- 🔔 **Une icône dans la barre des tâches et une page d'état locale**, pour qu'il ne tourne jamais invisiblement.
+- 🌐 **Octets par application**, en option et désactivé par défaut — une case à cocher dans le menu de l’icône. [Détails](docs/network.md)
+- 🔔 **Une icône dans la barre des tâches et une page d’état locale**, pour qu’il ne tourne jamais invisiblement.
 - 🎮 **Conçu pour ne pas coûter une image** — aucun hook, priorité basse, cœurs efficaces. [Détails](#performances)
 - 🔒 **Des comptes, pas un journal** — jamais ce que vous tapez. [Détails](#vie-privée)
 

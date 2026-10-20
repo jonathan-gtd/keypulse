@@ -92,6 +92,7 @@ async function refresh() {
   document.getElementById("head").textContent = `running for ${dur(d.uptime_s)}`;
   document.getElementById("meta").innerHTML =
     `host <code>${d.host}</code> · every ${d.interval} · last send ${d.last_send || "—"}` +
+    ` · network stats ${d.network === "on" ? "on" : d.network === "installed" ? "installed, not running" : "off"}` +
     (d.last_error ? ` · <span class="err">${d.last_error}</span>` : "") +
     `<div class="tags">${(d.tracking || []).map(t => `<span class="tag">${t}</span>`).join("")}</div>`;
   document.getElementById("out").textContent = d.output;

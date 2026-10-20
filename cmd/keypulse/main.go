@@ -94,6 +94,14 @@ func (a *agent) status() ui.Status {
 	if !a.last.IsZero() {
 		st.LastSend = a.last.Format("15:04:05")
 	}
+	switch n := netState(); {
+	case n.Running:
+		st.Network = "on"
+	case n.Installed:
+		st.Network = "installed"
+	default:
+		st.Network = "off"
+	}
 	for _, t := range a.session.TopApps {
 		st.Apps = append(st.Apps, ui.AppRow{App: t.App, Keys: t.Keys, Clicks: t.Clicks, ActiveSeconds: t.ActiveSeconds})
 	}
@@ -121,6 +129,19 @@ func (a *agent) tracking() []string {
 }
 
 func run() error {
+	// The network half of keypulse is the same executable, run as a
+	// service: Windows will not let one process both read raw input from
+	// the desktop and open a trace session. Its sub-commands come before
+	// the flags.
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "net") {
+		if handled, code := netCommand(os.Args[1], os.Args[2:]); handled {
+			if code != 0 {
+				os.Exit(code)
+			}
+			return nil
+		}
+	}
+
 	configPath := flag.String("config", config.DefaultPath(), "configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -220,9 +241,11 @@ func run() error {
 			tray.Quit()
 		}()
 		tray.Run(tray.Options{
-			Tooltip:  "keypulse — counting keyboard and mouse activity",
-			StatsURL: url,
-			OnQuit:   cancel,
+			Tooltip:     "keypulse — counting keyboard and mouse activity",
+			StatsURL:    url,
+			OnQuit:      cancel,
+			NetEnabled:  func() bool { return netState().Running },
+			OnToggleNet: netToggle,
 		}, nil)
 		cancel()
 	} else {

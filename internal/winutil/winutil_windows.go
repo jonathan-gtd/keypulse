@@ -5,6 +5,8 @@ package winutil
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"unsafe"
@@ -55,6 +57,70 @@ func LowerPriority() error {
 	if r, _, err := procSetProcessInformation.Call(uintptr(h), processPowerThrottling,
 		uintptr(unsafe.Pointer(&s)), unsafe.Sizeof(s)); r == 0 {
 		return err
+	}
+	return nil
+}
+
+var (
+	procShellExecuteW = windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteW")
+	procAttachConsole = windows.NewLazySystemDLL("kernel32.dll").NewProc("AttachConsole")
+)
+
+// attachParentProcess is ATTACH_PARENT_PROCESS, (DWORD)-1.
+const attachParentProcess = ^uintptr(0)
+
+// AttachParentConsole lets a program built for the GUI subsystem write to
+// the console it was launched from. keypulse is a GUI program so that no
+// window flashes at sign-in, but its sub-commands are run by hand and have
+// something to say.
+func AttachParentConsole() {
+	// When the output is already connected — a console that passed its
+	// handles down, a pipe, a file — leave it alone: replacing it with
+	// CONOUT$ would throw the redirection away.
+	if h, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE); err == nil &&
+		h != 0 && h != windows.InvalidHandle {
+		return
+	}
+	if r, _, _ := procAttachConsole.Call(attachParentProcess); r == 0 {
+		return
+	}
+	name, err := windows.UTF16PtrFromString("CONOUT$")
+	if err != nil {
+		return
+	}
+	h, err := windows.CreateFile(name, windows.GENERIC_WRITE, windows.FILE_SHARE_WRITE,
+		nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		return
+	}
+	f := os.NewFile(uintptr(h), "CONOUT$")
+	os.Stdout, os.Stderr = f, f
+}
+
+// RunElevated starts a program through the "runas" verb, which is what
+// raises the Windows consent prompt. It returns once the prompt is
+// answered; a refusal is an error.
+func RunElevated(exe string, args ...string) error {
+	verb, err := windows.UTF16PtrFromString("runas")
+	if err != nil {
+		return err
+	}
+	file, err := windows.UTF16PtrFromString(exe)
+	if err != nil {
+		return err
+	}
+	params, err := windows.UTF16PtrFromString(strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
+	// ShellExecute returns a value above 32 on success.
+	r, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verb)),
+		uintptr(unsafe.Pointer(file)), uintptr(unsafe.Pointer(params)), 0, uintptr(windows.SW_HIDE))
+	if r <= 32 {
+		if windows.Errno(r) == windows.ERROR_CANCELLED {
+			return errors.New("the administrator prompt was declined")
+		}
+		return fmt.Errorf("ShellExecute returned %d", r)
 	}
 	return nil
 }

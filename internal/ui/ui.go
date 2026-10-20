@@ -25,6 +25,7 @@ type Status struct {
 	UptimeSec int64    `json:"uptime_s"`
 	Tracking  []string `json:"tracking"`
 
+	Network    string `json:"network"` // off, installed or on
 	LastSend   string `json:"last_send"`
 	LastError  string `json:"last_error"`
 	SentPoints uint64 `json:"sent_points"`

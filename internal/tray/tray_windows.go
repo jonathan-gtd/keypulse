@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"fyne.io/systray"
 )
@@ -20,6 +21,12 @@ type Options struct {
 	Tooltip  string
 	StatsURL string // empty when the local page is disabled
 	OnQuit   func() // called when the user picks Quit, before Run returns
+
+	// Network statistics are collected by the same executable running as a
+	// service, which has to be registered with administrator rights. The
+	// menu entry shows whether it is on and asks Windows for consent.
+	NetEnabled  func() bool
+	OnToggleNet func(on bool) error
 }
 
 // Run shows the icon and blocks until Quit. It must be called on the main
@@ -36,6 +43,30 @@ func Run(opt Options, ready func()) {
 			go func() {
 				for range open.ClickedCh {
 					OpenURL(opt.StatsURL)
+				}
+			}()
+			systray.AddSeparator()
+		}
+		if opt.NetEnabled != nil && opt.OnToggleNet != nil {
+			net := systray.AddMenuItemCheckbox("Network statistics",
+				"Count bytes sent and received per application (needs administrator rights once)",
+				opt.NetEnabled())
+			go func() {
+				for range net.ClickedCh {
+					want := !net.Checked()
+					net.Disable()
+					if err := opt.OnToggleNet(want); err != nil {
+						systray.SetTooltip("keypulse — " + err.Error())
+					}
+					// The service takes a moment to register and start, so
+					// the tick follows what actually happened, not the click.
+					time.Sleep(2 * time.Second)
+					if opt.NetEnabled() {
+						net.Check()
+					} else {
+						net.Uncheck()
+					}
+					net.Enable()
 				}
 			}()
 			systray.AddSeparator()

@@ -21,6 +21,7 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 - 🪟 **Per application** — how much you type in your editor, click in your game, and how long each one is in front.
 - 🔥 **Heatmaps** — where the cursor goes, where you click, and (opt-in) which keys you use.
 - 📈 **More than totals** — typing-speed peaks, typing rhythm, hand balance, key and click hold times, double-clicks, peak cursor speed, idle time, time with the pointer held by a game.
+- 🌐 **Bytes per application**, optional and off by default — one tick in the tray menu. [Details](docs/network.md)
 - 🔔 **A tray icon and a local status page**, so it is never running invisibly.
 - 🎮 **Built not to cost a frame** — no input hook, below-normal priority, efficiency cores. [Details](#performance)
 - 🔒 **Counts only** — never what you type. [Details](#privacy)
@@ -43,7 +44,9 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 
 From there, any Telegraf output works: InfluxDB, PostgreSQL/TimescaleDB, MQTT, Prometheus… See [docs/telegraf.md](docs/telegraf.md) for a TimescaleDB example. keypulse can also post to InfluxDB 2 directly (`output.url` in the configuration).
 
-**3. Click the tray icon** to open the status page and check the numbers are moving.
+**3. Click the tray icon** to open the status page and check the numbers are moving. The same menu has **Network statistics**, off by default: ticking it asks Windows for consent once and then counts bytes per application too.
+
+One program does all of it. `keypulse.exe` is the agent when you run it and the network collector when the service manager starts it — see [docs/network.md](docs/network.md) for why that part cannot be a single process.
 
 ---
 
@@ -93,6 +96,7 @@ keypulse_heatmap,host=pc,kind=click,x=31,y=17 count=4i 1760000000000000000
 | `keypulse_keys` | `host`, `key` | `count` — only with `per_key` |
 | `keypulse_shortcuts` | `host`, `combo` | `count` — only with `shortcuts` |
 | `keypulse_heatmap` | `host`, `kind` (`move`/`click`), `x`, `y` | `count` — cells from the top-left corner of the desktop |
+| `keypulse_net` | `host`, `app` | `bytes_sent`, `bytes_recv`, `bytes_total`, `events` — only with network statistics on |
 
 Hold times are reported as a total and a count, so an average can be charted without keeping each press.
 

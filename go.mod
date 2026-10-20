@@ -1,10 +1,10 @@
 module github.com/jonathan-gtd/keypulse
 
-go 1.26.0
+go 1.24
 
 require (
 	fyne.io/systray v1.12.2
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.30.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

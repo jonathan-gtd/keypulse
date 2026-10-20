@@ -1,65 +1,71 @@
 # Per-application network traffic
 
-`keypulse-net` reports how many bytes each application sends and receives —
-the one WhatPulse feature keypulse itself cannot provide.
+keypulse can also report how many bytes each application sends and
+receives — the one WhatPulse feature that needs more than a user program.
 
-> **Status: not yet released.** The code is on `main` and builds, but it has
-> not been run on real hardware yet, so there is no release binary. Build it
-> yourself if you want to try it, and please report what you find.
+> **Status: the collector has not yet run on real hardware.** It ships in
+> the normal keypulse binary and is off until you turn it on, so nothing
+> changes until you do. Please report what you find.
 
-## Why it is a separate program
+## Why there is a service, in one program
 
 Windows does not expose per-process network traffic through any ordinary
 counter. The only source is **Event Tracing for Windows**, and opening a
-trace session is a privileged operation.
+trace session is privileged.
 
-keypulse itself is deliberately a plain user program: no administrator
-rights, no service, nothing in the system. Rather than give the whole agent
-those rights, the network part is a second, small program that runs as a
-service, and everything else stays as it was.
+A service, though, runs in session 0, where there is no desktop: it cannot
+receive Raw Input and cannot see which window is in front. So no single
+process can do both halves — that part is Windows, not a choice.
+
+What *is* a choice is how many programs you end up with, and the answer is
+one. `keypulse.exe` is the agent when you run it, and the network collector
+when the service manager starts it. One download, one installer, one
+configuration file, one icon.
+
+## Turning it on
+
+**From the tray icon:** click it and tick **Network statistics**. Windows
+asks for consent once — registering a service needs it — and that is all.
+Untick it to remove the service again.
+
+**Or from a terminal**, as Administrator:
+
+```powershell
+keypulse.exe net-install     # register and start the service
+keypulse.exe net-uninstall   # stop and remove it
+keypulse.exe net             # run it in this console instead, Ctrl-C to stop
+keypulse.exe net-check       # verify the Windows structure layouts (no admin)
+```
+
+The service takes its settings from your `config.yaml` at the moment you
+enable it — the same output, host and interval as the agent — and keeps
+them, because a service running as LocalSystem cannot read your profile.
+Change the configuration and you will want to toggle it off and on again.
+
+`net-check` is worth running first: it confirms every structure shared with
+Windows has the size and offsets the C headers give, which is the
+difference between a working trace and a crash, and it needs no rights at
+all.
 
 ## What it reads
 
-For each network event the kernel reports, it reads exactly two numbers:
-the **process id** and the **number of bytes**. Nothing else — no address,
-no port, no hostname, no packet content. Those are added up per executable
-and sent once a minute:
+For each network event the kernel reports, exactly two numbers: the
+**process id** and the **number of bytes**. Nothing else — no address, no
+port, no hostname, no packet content. Those are added up per executable:
 
 ```
 keypulse_net,host=pc,app=chrome.exe bytes_sent=182334i,bytes_recv=9281004i,bytes_total=9463338i,events=1420i <ts>
 ```
 
-It writes to the same place keypulse does, so Telegraf picks it up with the
-`socket_listener` you already have.
+It writes wherever the agent writes, so Telegraf picks it up with the
+`socket_listener` already there.
 
-## Install
+## If something goes wrong
 
-```powershell
-# from an Administrator PowerShell
-.\keypulse-net.exe install -output udp://127.0.0.1:8094 -host mars
-.\keypulse-net.exe uninstall     # to remove it again
-```
-
-`install` registers a service named `keypulse-net` that starts with Windows,
-and starts it immediately. Options:
-
-| Flag | Default | |
-|---|---|---|
-| `-output` | `udp://127.0.0.1:8094` | Same sinks as keypulse (`udp://`, `http(s)://`) |
-| `-host` | computer name | Value of the `host` tag |
-| `-interval` | `60s` | How often to report |
-| `-measurement` | `keypulse_net` | Measurement name |
-| `-log` | `%ProgramData%\keypulse\keypulse-net.log` | Log file |
-
-Run it without a sub-command to try it in a console first (still as
-administrator); Ctrl-C stops it and closes the trace session cleanly.
-
-## Removing it
-
-`.\keypulse-net.exe uninstall` stops and deletes the service. If a trace
+The service logs to `%ProgramData%\keypulse\keypulse-net.log`. If a trace
 session is ever left behind — after a hard kill, say — `logman stop
-keypulse-net -ets` clears it, and the next start cleans up stale sessions by
-itself.
+keypulse-net -ets` clears it, and the next start cleans up stale sessions
+by itself.
 
 ## Charting it
 

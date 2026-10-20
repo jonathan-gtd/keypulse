@@ -1,10 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-10-20
 
-- `keypulse-net`: a separate, optional Windows service reporting **bytes sent and received per application**, read from the kernel network provider through a minimal Event Tracing consumer written for the purpose. Only the process id and the byte count are read from each event — never an address, a port or any packet content. See [docs/network.md](docs/network.md).
+Changed
+- **One program instead of two.** The network collector is no longer a separate `keypulse-net.exe`: it is the same `keypulse.exe`, run as a service by the service manager. One download, one installer, one configuration file, one icon. Windows still needs two *processes* — a service has no desktop and cannot read raw input — but that is now an implementation detail rather than a second application to install.
 
-  Not released yet: it needs administrator rights to open a trace session and has not been run on real hardware, so there is no binary in the releases. `keypulse-net check` verifies the Windows structure layouts without elevation.
+Added
+- **Network statistics** reporting bytes sent and received per application, from the kernel network provider through a minimal Event Tracing consumer written for the purpose. Only the process id and the byte count are read from each event — never an address, a port or any packet content. See [docs/network.md](docs/network.md).
+- A **Network statistics** tick in the tray menu that turns it on, asking Windows for consent once instead of needing a command line.
+- Sub-commands `net`, `net-install`, `net-uninstall` and `net-check`; the last verifies the Windows structure layouts and needs no rights.
+- The status page says whether network statistics are on.
+- Sub-commands print to the console they were launched from, although keypulse is a GUI program.
+
+Note: the collector itself has not yet run on real hardware — opening a trace session needs administrator rights. It is off until you turn it on.
 
 ## [0.4.0] - 2026-10-20
 
