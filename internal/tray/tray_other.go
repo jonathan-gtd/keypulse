@@ -4,11 +4,9 @@ package tray
 
 // Options configures the icon and its menu.
 type Options struct {
-	Tooltip     string
-	StatsURL    string
-	OnQuit      func()
-	NetEnabled  func() bool
-	OnToggleNet func(on bool) error
+	Tooltip  string
+	StatsURL string
+	OnQuit   func()
 }
 
 // Run is a no-op outside Windows: it returns at once, so the caller falls

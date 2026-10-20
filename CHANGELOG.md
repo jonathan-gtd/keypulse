@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+Removed
+- **Per-application network statistics**, and with them the whole ETW/service machinery. The total per-machine network use was already covered by the hardware monitoring (Telegraf `inputs.net`), and the per-application breakdown was not worth a permanent privileged service. keypulse is a plain user program again, with no sub-commands and nothing running as a service.
+
 ## [0.5.0] - 2026-10-20
 
 Changed
