@@ -65,6 +65,9 @@ func run() error {
 	if err := winutil.LowerPriority(); err != nil {
 		log.Printf("lowering priority: %v", err)
 	}
+	if err := winutil.SetDPIAware(); err != nil {
+		log.Printf("DPI awareness: %v", err)
+	}
 
 	out, err := sink.New(cfg.Output.URL, cfg.Output.Token, cfg.Output.MaxBuffer)
 	if err != nil {

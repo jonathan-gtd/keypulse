@@ -17,7 +17,7 @@ envoyés à Telegraf ou InfluxDB, affichés dans Grafana. Comme WhatPulse, sans 
 
 [WhatPulse](https://whatpulse.org) et [MouseTracks](https://github.com/huntfx/MouseTracks) montrent comment vous utilisez clavier et souris, mais gardent les données dans leur application ou leur cloud. keypulse est un petit agent Windows qui fait le comptage et confie les chiffres à ce que vous faites déjà tourner — Telegraf, InfluxDB, TimescaleDB, Grafana.
 
-- ⌨️ **Touches, clics, molette, distance de la souris et temps actif**, chaque minute.
+- ⌨️ **Touches, clics, molette, distance de la souris et temps actif**, chaque minute — trajet du curseur en vrais mètres, sans DPI à saisir.
 - 🪟 **Par application** — combien vous tapez dans votre éditeur, cliquez dans votre jeu.
 - 🔥 **Heatmaps** — où passe le curseur, où vous cliquez et (en option) quelles touches vous utilisez.
 - 🎮 **Conçu pour ne pas coûter une image** — aucun hook, priorité basse, cœurs efficaces. [Détails](#performances)
@@ -54,7 +54,7 @@ Ensuite, n'importe quelle sortie Telegraf convient : InfluxDB, PostgreSQL/Timesc
 | `per_key` | `false` | Compte de chaque touche |
 | `heatmap.enabled` | `true` | Positions du curseur et des clics |
 | `heatmap.cell_size` | `40` | Grille de la heatmap, en pixels |
-| `mouse_dpi` | `0` | DPI de votre souris, pour la distance en mètres |
+| `mouse_dpi` | `0` | DPI de votre souris, pour la distance parcourue sur le bureau (`mouse_m`) |
 | `output.url` | `udp://127.0.0.1:8094` | `udp://` (Telegraf), `http(s)://` (listener Telegraf, InfluxDB 2) |
 | `output.token` | | Jeton InfluxDB |
 | `host` | nom de l'ordinateur | Valeur du tag `host` |

@@ -17,7 +17,7 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 
 [WhatPulse](https://whatpulse.org) and [MouseTracks](https://github.com/huntfx/MouseTracks) show how you use your keyboard and mouse, but keep the data in their own app or cloud. keypulse is a small Windows agent that does the counting and hands the numbers to the stack you already run — Telegraf, InfluxDB, TimescaleDB, Grafana.
 
-- ⌨️ **Keys, clicks, wheel, mouse distance and active time**, every minute.
+- ⌨️ **Keys, clicks, wheel, mouse distance and active time**, every minute — cursor travel in real meters, no DPI to enter.
 - 🪟 **Per application** — how much you type in your editor, click in your game.
 - 🔥 **Heatmaps** — where the cursor goes and where you click, and (opt-in) which keys you use.
 - 🎮 **Built not to cost a frame** — no input hook, below-normal priority, efficiency cores. [Details](#performance)
@@ -54,7 +54,7 @@ From there, any Telegraf output works: InfluxDB, PostgreSQL/TimescaleDB, MQTT, P
 | `per_key` | `false` | Count every key separately |
 | `heatmap.enabled` | `true` | Cursor and click positions |
 | `heatmap.cell_size` | `40` | Heatmap grid, in pixels |
-| `mouse_dpi` | `0` | Your mouse's DPI, to also get the distance in meters |
+| `mouse_dpi` | `0` | Your mouse DPI, to also get the distance the mouse travels on the desk (`mouse_m`) |
 | `output.url` | `udp://127.0.0.1:8094` | `udp://` (Telegraf), `http(s)://` (Telegraf listener, InfluxDB 2) |
 | `output.token` | | InfluxDB token |
 | `host` | computer name | Value of the `host` tag |
@@ -68,16 +68,18 @@ Restart keypulse after a change: end it in Task Manager, then start it again fro
 Line protocol, one batch per interval, nothing sent when nothing happened:
 
 ```
-keypulse,host=pc,app=code.exe keys=412i,clicks=37i,clicks_left=31i,clicks_right=6i,clicks_middle=0i,clicks_x1=0i,clicks_x2=0i,wheel_up=24,wheel_down=31,wheel_left=0,wheel_right=0,mouse_distance=48211.5,active_s=58i 1760000000000000000
+keypulse,host=pc,app=code.exe keys=412i,clicks=37i,clicks_left=31i,clicks_right=6i,clicks_middle=0i,clicks_x1=0i,clicks_x2=0i,wheel_up=24,wheel_down=31,wheel_left=0,wheel_right=0,mouse_distance=48211.5,cursor_m=11.2731,active_s=58i 1760000000000000000
 keypulse_keys,host=pc,key=SPACE count=61i 1760000000000000000
 keypulse_heatmap,host=pc,kind=click,x=31,y=17 count=4i 1760000000000000000
 ```
 
 | Measurement | Tags | Fields |
 |---|---|---|
-| `keypulse` | `host`, `app` | `keys`, `clicks`, `clicks_<button>`, `wheel_up/down/left/right` (notches), `mouse_distance` (sensor counts), `mouse_m` (if `mouse_dpi` is set), `active_s` |
+| `keypulse` | `host`, `app` | `keys`, `clicks`, `clicks_<button>`, `wheel_up/down/left/right` (notches), `mouse_distance` (sensor counts), `cursor_m` (on-screen cursor travel, meters), `mouse_m` (if `mouse_dpi` is set), `active_s` |
 | `keypulse_keys` | `host`, `key` | `count` — only with `per_key` |
 | `keypulse_heatmap` | `host`, `kind` (`move`/`click`), `x`, `y` | `count` — cells from the top-left corner of the desktop |
+
+`cursor_m` is measured like WhatPulse does it: the distance the cursor covers on screen, converted to meters with the physical size Windows reads from each monitor (EDID). Mouse DPI cannot be read by software, so this needs no setting. Games that capture the mouse confine the cursor; keypulse detects it and adds neither cursor distance nor heatmap samples while it lasts — `mouse_distance` keeps counting.
 
 Key names follow Windows virtual keys (`A`, `SPACE`, `LCTRL`, `NUMPAD_ENTER`, `OEM_1`…), so letters follow your keyboard layout. A held key counts once, not once per auto-repeat.
 

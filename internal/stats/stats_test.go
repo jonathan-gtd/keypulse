@@ -27,6 +27,8 @@ func TestCounterSnapshot(t *testing.T) {
 	c.Move(3)
 	c.Move(4)
 	c.Move(-1) // ignored
+	c.Cursor(0.25)
+	c.Cursor(0.5)
 	c.SetApp("")
 	c.Click(Right)
 	c.Heat(Cell{Move, 1, 2})
@@ -46,8 +48,8 @@ func TestCounterSnapshot(t *testing.T) {
 	if g.WheelUp != 2 || g.WheelDown != 0.5 || g.WheelRight != 1 || g.WheelLeft != 1 {
 		t.Errorf("wheel = %v %v %v %v", g.WheelUp, g.WheelDown, g.WheelRight, g.WheelLeft)
 	}
-	if g.MouseDistance != 7 || g.ActiveSeconds != 2 {
-		t.Errorf("distance = %v, active = %d", g.MouseDistance, g.ActiveSeconds)
+	if g.MouseDistance != 7 || g.CursorMeters != 0.75 || g.ActiveSeconds != 2 {
+		t.Errorf("distance = %v, cursor = %v, active = %d", g.MouseDistance, g.CursorMeters, g.ActiveSeconds)
 	}
 	u := s.Apps[UnknownApp]
 	if u.Keys != 1 || u.Clicks[Right] != 1 {

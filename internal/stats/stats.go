@@ -60,6 +60,10 @@ type App struct {
 	// tablets or remote desktop sessions).
 	MouseDistance float64
 
+	// CursorMeters is the distance travelled by the cursor on screen, in
+	// meters, from the physical size of the monitors.
+	CursorMeters float64
+
 	// ActiveSeconds is the number of distinct seconds with at least one input.
 	ActiveSeconds uint64
 }
@@ -91,6 +95,7 @@ type appAcc struct {
 	clicks     [NumButtons]uint64
 	wheel      [4]int64 // up, down, right, left, in raw delta units
 	distance   float64
+	cursor     float64
 	active     uint64
 	lastActive int64
 }
@@ -210,6 +215,16 @@ func (c *Counter) Move(d float64) {
 	c.acc().distance += d
 }
 
+// Cursor records an on-screen cursor movement of m meters.
+func (c *Counter) Cursor(m float64) {
+	if m <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.acc().cursor += m
+}
+
 // Heat adds one sample to a heatmap cell.
 func (c *Counter) Heat(cell Cell) {
 	if !c.heat {
@@ -238,6 +253,7 @@ func (c *Counter) Snapshot(end time.Time) Snapshot {
 			WheelRight:    float64(a.wheel[2]) / wheelNotch,
 			WheelLeft:     float64(a.wheel[3]) / wheelNotch,
 			MouseDistance: a.distance,
+			CursorMeters:  a.cursor,
 			ActiveSeconds: a.active,
 		}
 	}

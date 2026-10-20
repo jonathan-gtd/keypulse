@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0] - 2026-10-20
+
+- `cursor_m`: on-screen cursor travel in meters, from the physical size of the monitors — no DPI to configure.
+- Per-monitor DPI awareness: heatmap cells and distances are right on scaled displays (125 %, 150 %…).
+- While a game confines the cursor, no cursor distance or heatmap sample is recorded.
+
 ## [0.1.0] - 2026-10-20
 
 First release.

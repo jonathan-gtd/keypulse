@@ -55,6 +55,7 @@ func Encode(o Options, s stats.Snapshot) []byte {
 		if o.MouseDPI > 0 {
 			writeFloat(&b, "mouse_m", round(a.MouseDistance/o.MouseDPI*0.0254, 3))
 		}
+		writeFloat(&b, "cursor_m", round(a.CursorMeters, 4))
 		writeInt(&b, "active_s", a.ActiveSeconds, false)
 		b.WriteString(ts)
 	}

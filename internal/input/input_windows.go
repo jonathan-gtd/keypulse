@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -33,14 +34,23 @@ var (
 	procSetTimer                = user32.NewProc("SetTimer")
 	procSetWinEventHook         = user32.NewProc("SetWinEventHook")
 	procUnhookWinEvent          = user32.NewProc("UnhookWinEvent")
+	procGetClipCursor           = user32.NewProc("GetClipCursor")
+	procMonitorFromPoint        = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfoW         = user32.NewProc("GetMonitorInfoW")
 	procGetModuleHandleW        = kernel32.NewProc("GetModuleHandleW")
+
+	gdi32             = windows.NewLazySystemDLL("gdi32.dll")
+	procCreateDCW     = gdi32.NewProc("CreateDCW")
+	procGetDeviceCaps = gdi32.NewProc("GetDeviceCaps")
+	procDeleteDC      = gdi32.NewProc("DeleteDC")
 )
 
 const (
-	wmEndSession = 0x0016
-	wmQuit       = 0x0012
-	wmInput      = 0x00FF
-	wmTimer      = 0x0113
+	wmEndSession    = 0x0016
+	wmQuit          = 0x0012
+	wmDisplayChange = 0x007E
+	wmInput         = 0x00FF
+	wmTimer         = 0x0113
 
 	wsPopup        = 0x80000000
 	wsExToolWindow = 0x00000080
@@ -77,6 +87,14 @@ const (
 
 	cursorTimerID = 1
 	cursorTimerMs = 100
+
+	// The cursor path is sampled at most this often: enough for its length,
+	// and cheap with mice polling at several kHz.
+	cursorTrackEvery = 8 * time.Millisecond
+
+	monitorDefaultToNearest = 2
+	horzSize                = 4 // GetDeviceCaps: width in millimeters
+	horzRes                 = 8 // GetDeviceCaps: width in pixels
 )
 
 type rawInputDevice struct {
@@ -130,6 +148,16 @@ type wndClassEx struct {
 
 type point struct{ x, y int32 }
 
+type rect struct{ left, top, right, bottom int32 }
+
+type monitorInfoEx struct {
+	size    uint32
+	monitor rect
+	work    rect
+	flags   uint32
+	device  [32]uint16
+}
+
 type msg struct {
 	hwnd    uintptr
 	message uint32
@@ -148,7 +176,8 @@ func Run(ctx context.Context, c *stats.Counter, opt Options) error {
 	if opt.CellSize <= 0 {
 		opt.CellSize = 40
 	}
-	l := &listener{c: c, opt: opt, apps: make(map[uint32]string)}
+	l := &listener{c: c, opt: opt, apps: make(map[uint32]string), scales: make(map[uintptr]float64)}
+	l.refreshScreen()
 	errc := make(chan error, 1)
 	tidc := make(chan uint32, 1)
 	go func() {
@@ -185,6 +214,13 @@ type listener struct {
 	moved   bool
 	lastPos point
 	havePos bool
+
+	curPos    point
+	haveCur   bool
+	lastTrack time.Time
+
+	virtual rect                // virtual desktop, refreshed on WM_DISPLAYCHANGE
+	scales  map[uintptr]float64 // monitor handle -> meters per pixel
 
 	apps map[uint32]string // process id -> executable name
 	buf  [16]uint64        // RAWINPUT buffer, 8-byte aligned
@@ -261,6 +297,8 @@ func (l *listener) wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 			l.opt.OnEndSession()
 		}
 		return 0
+	case wmDisplayChange:
+		l.refreshScreen()
 	}
 	r, _, _ := procDefWindowProcW.Call(hwnd, message, wParam, lParam)
 	return r
@@ -348,11 +386,74 @@ func (l *listener) mouse(m *rawMouse) {
 		}
 		l.absX, l.absY, l.haveAbs = x, y, true
 		l.moved = true
+		l.trackCursor()
 	} else if m.lastX != 0 || m.lastY != 0 {
 		l.haveAbs = false
 		l.c.Move(math.Hypot(float64(m.lastX), float64(m.lastY)))
 		l.moved = true
+		l.trackCursor()
 	}
+}
+
+// trackCursor adds the on-screen distance covered by the cursor since the
+// previous sample, converted to meters with the physical size of the monitor.
+func (l *listener) trackCursor() {
+	now := time.Now()
+	if now.Sub(l.lastTrack) < cursorTrackEvery {
+		return
+	}
+	l.lastTrack = now
+	p, ok := cursorPos()
+	if !ok || l.pointerLocked() {
+		l.haveCur = false
+		return
+	}
+	if l.haveCur && p != l.curPos {
+		d := math.Hypot(float64(p.x-l.curPos.x), float64(p.y-l.curPos.y))
+		l.c.Cursor(d * l.metersPerPixel(p))
+	}
+	l.curPos, l.haveCur = p, true
+}
+
+// pointerLocked reports whether the cursor is confined to part of the
+// desktop, as games do when they capture the mouse. Its position then says
+// nothing about where the user is pointing.
+func (l *listener) pointerLocked() bool {
+	var r rect
+	if ok, _, _ := procGetClipCursor.Call(uintptr(unsafe.Pointer(&r))); ok == 0 {
+		return false
+	}
+	return r.right-r.left < l.virtual.right-l.virtual.left || r.bottom-r.top < l.virtual.bottom-l.virtual.top
+}
+
+func (l *listener) refreshScreen() {
+	x, y := systemMetric(smXVirtualScreen), systemMetric(smYVirtualScreen)
+	l.virtual = rect{x, y, x + systemMetric(smCxVirtualScreen), y + systemMetric(smCyVirtualScreen)}
+	clear(l.scales)
+}
+
+// metersPerPixel returns the pixel pitch of the monitor under p, from the
+// physical size Windows reads in the monitor's EDID (96 DPI when unknown).
+func (l *listener) metersPerPixel(p point) float64 {
+	mon, _, _ := procMonitorFromPoint.Call(uintptr(uint32(p.x))|uintptr(uint32(p.y))<<32, monitorDefaultToNearest)
+	if s, ok := l.scales[mon]; ok {
+		return s
+	}
+	s := 0.0254 / 96
+	info := monitorInfoEx{}
+	info.size = uint32(unsafe.Sizeof(info))
+	if r, _, _ := procGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&info))); r != 0 {
+		if dc, _, _ := procCreateDCW.Call(0, uintptr(unsafe.Pointer(&info.device[0])), 0, 0); dc != 0 {
+			mm, _, _ := procGetDeviceCaps.Call(dc, horzSize)
+			px, _, _ := procGetDeviceCaps.Call(dc, horzRes)
+			procDeleteDC.Call(dc)
+			if int32(mm) > 0 && int32(px) > 0 {
+				s = float64(int32(mm)) / 1000 / float64(int32(px))
+			}
+		}
+	}
+	l.scales[mon] = s
+	return s
 }
 
 // sampleCursor adds the cursor position to the heatmap, at most every
@@ -364,7 +465,7 @@ func (l *listener) sampleCursor() {
 	}
 	l.moved = false
 	p, ok := cursorPos()
-	if !ok || (l.havePos && p == l.lastPos) {
+	if !ok || (l.havePos && p == l.lastPos) || l.pointerLocked() {
 		return
 	}
 	l.lastPos, l.havePos = p, true
@@ -376,7 +477,7 @@ func (l *listener) sampleCursor() {
 // top-left corner of the virtual desktop (monitors can sit at negative coordinates).
 func (l *listener) cell(p point) (int32, int32) {
 	cs := int32(l.opt.CellSize)
-	return (p.x - systemMetric(smXVirtualScreen)) / cs, (p.y - systemMetric(smYVirtualScreen)) / cs
+	return (p.x - l.virtual.left) / cs, (p.y - l.virtual.top) / cs
 }
 
 func (l *listener) winEvent(hook, event, hwnd, idObject, idChild, thread, eventTime uintptr) uintptr {

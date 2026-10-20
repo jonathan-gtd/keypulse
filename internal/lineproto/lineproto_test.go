@@ -12,14 +12,14 @@ func TestEncode(t *testing.T) {
 	s := stats.Snapshot{
 		End: time.Unix(1700000000, 0),
 		Apps: map[string]stats.App{
-			"my game.exe": {Keys: 12, Clicks: [stats.NumButtons]uint64{3, 1}, WheelUp: 2.5, MouseDistance: 1234.56, ActiveSeconds: 40},
+			"my game.exe": {Keys: 12, Clicks: [stats.NumButtons]uint64{3, 1}, WheelUp: 2.5, MouseDistance: 1234.56, CursorMeters: 0.123456, ActiveSeconds: 40},
 		},
 		Keys: map[string]uint64{"SPACE": 5, "A": 7},
 		Heat: map[stats.Cell]uint64{{Kind: stats.Click, X: 4, Y: 2}: 1, {Kind: stats.Move, X: 10, Y: 0}: 9},
 	}
 	got := string(Encode(Options{Host: "mars", MouseDPI: 1600}, s))
 	want := strings.Join([]string{
-		`keypulse,host=mars,app=my\ game.exe keys=12i,clicks=4i,clicks_left=3i,clicks_right=1i,clicks_middle=0i,clicks_x1=0i,clicks_x2=0i,wheel_up=2.5,wheel_down=0,wheel_left=0,wheel_right=0,mouse_distance=1234.6,mouse_m=0.02,active_s=40i 1700000000000000000`,
+		`keypulse,host=mars,app=my\ game.exe keys=12i,clicks=4i,clicks_left=3i,clicks_right=1i,clicks_middle=0i,clicks_x1=0i,clicks_x2=0i,wheel_up=2.5,wheel_down=0,wheel_left=0,wheel_right=0,mouse_distance=1234.6,mouse_m=0.02,cursor_m=0.1235,active_s=40i 1700000000000000000`,
 		`keypulse_keys,host=mars,key=A count=7i 1700000000000000000`,
 		`keypulse_keys,host=mars,key=SPACE count=5i 1700000000000000000`,
 		`keypulse_heatmap,host=mars,kind=move,x=10,y=0 count=9i 1700000000000000000`,

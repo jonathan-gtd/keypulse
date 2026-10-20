@@ -13,7 +13,23 @@ import (
 // ErrAlreadyRunning is returned by SingleInstance when another instance holds the lock.
 var ErrAlreadyRunning = errors.New("keypulse is already running")
 
-var procSetProcessInformation = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetProcessInformation")
+var (
+	procSetProcessInformation         = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetProcessInformation")
+	procSetProcessDpiAwarenessContext = windows.NewLazySystemDLL("user32.dll").NewProc("SetProcessDpiAwarenessContext")
+)
+
+// dpiAwarenessPerMonitorV2 is DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, (HANDLE)-4.
+const dpiAwarenessPerMonitorV2 = ^uintptr(3)
+
+// SetDPIAware makes Windows report real pixels to the process. Without it,
+// cursor positions are scaled on monitors set to 125 %, 150 %…, which skews
+// the heatmap and the cursor distance.
+func SetDPIAware() error {
+	if r, _, err := procSetProcessDpiAwarenessContext.Call(dpiAwarenessPerMonitorV2); r == 0 {
+		return err
+	}
+	return nil
+}
 
 const (
 	processPowerThrottling          = 4 // PROCESS_INFORMATION_CLASS
