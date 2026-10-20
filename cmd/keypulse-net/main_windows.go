@@ -43,13 +43,6 @@ var kernelNetwork = windows.GUID{
 	Data4: [8]byte{0x8d, 0xfd, 0x43, 0xd9, 0x79, 0x15, 0x3a, 0x88},
 }
 
-// Event ids of the kernel network provider. The payload of every one of
-// them starts with the process id and the number of bytes.
-var direction = map[uint16]bool{
-	10: true, 26: true, 42: true, 58: true, // sent:     TCP v4/v6, UDP v4/v6
-	11: false, 27: false, 43: false, 59: false, // received: idem
-}
-
 type options struct {
 	output      string
 	host        string
@@ -88,6 +81,8 @@ func main() {
 		}
 		fmt.Printf("service %q removed\n", serviceName)
 		return
+	case "check":
+		os.Exit(check())
 	}
 
 	setupLog(opt.logFile)
@@ -166,13 +161,9 @@ func collect(opt options, stop <-chan struct{}) error {
 
 	c := netstat.New(winutil.ProcessName)
 	session := etw.NewSession(sessionName, kernelNetwork, func(e etw.Event) {
-		sent, ok := direction[e.ID]
-		if !ok || len(e.Data) < 8 {
-			return
+		if pid, size, sent, ok := netstat.DecodeKernelNetwork(e.ID, e.Data); ok {
+			c.Add(pid, size, sent)
 		}
-		pid := uint32(e.Data[0]) | uint32(e.Data[1])<<8 | uint32(e.Data[2])<<16 | uint32(e.Data[3])<<24
-		size := uint32(e.Data[4]) | uint32(e.Data[5])<<8 | uint32(e.Data[6])<<16 | uint32(e.Data[7])<<24
-		c.Add(pid, size, sent)
 	})
 	if err := session.Start(); err != nil {
 		return err
@@ -211,6 +202,39 @@ func collect(opt options, stop <-chan struct{}) error {
 			flush(next)
 		}
 	}
+}
+
+// check verifies everything that can be verified without administrator
+// rights: that every structure shared with Windows has the size and layout
+// the C headers give. A mismatch there is what turns a trace into a crash,
+// so it is worth confirming before asking for elevation.
+func check() int {
+	bad := 0
+	fmt.Printf("keypulse-net %s — structures partagées avec Windows (x64)\n\n", version)
+	fmt.Printf("  %-46s %8s %8s\n", "STRUCTURE", "ATTENDU", "OBTENU")
+	for _, l := range etw.Layouts() {
+		mark := "ok"
+		if !l.OK() {
+			mark, bad = "ERREUR", bad+1
+		}
+		fmt.Printf("  %-46s %8d %8d  %s\n", l.Name, l.Want, l.Got, mark)
+	}
+	fmt.Printf("\n  %-46s %8s %8s\n", "CHAMP LU DANS CHAQUE ÉVÉNEMENT", "ATTENDU", "OBTENU")
+	for _, l := range etw.Offsets() {
+		mark := "ok"
+		if !l.OK() {
+			mark, bad = "ERREUR", bad+1
+		}
+		fmt.Printf("  %-46s %8d %8d  %s\n", l.Name, l.Want, l.Got, mark)
+	}
+	fmt.Println()
+	if bad > 0 {
+		fmt.Printf("%d problème(s) : ne pas lancer la collecte en l'état.\n", bad)
+		return 1
+	}
+	fmt.Println("Tout est conforme. Reste à vérifier la session de trace elle-même,")
+	fmt.Println("ce qui demande une invite administrateur.")
+	return 0
 }
 
 func install(opt options) error {

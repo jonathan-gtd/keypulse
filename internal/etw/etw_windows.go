@@ -11,6 +11,7 @@ package etw
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -152,6 +153,75 @@ type Session struct {
 	cb      uintptr
 }
 
+// Layout is one structure's expected and actual size.
+type Layout struct {
+	Name      string
+	Want, Got uintptr
+}
+
+// OK reports whether the structure matches the Windows layout.
+func (l Layout) OK() bool { return l.Want == l.Got }
+
+// Layouts returns the size of every structure shared with Windows, against
+// the size the C headers give on x64. Getting one of these wrong is the
+// difference between a working trace and a crash, and it can be checked
+// without opening a session — so `keypulse-net check` does, without needing
+// administrator rights.
+func Layouts() []Layout {
+	return []Layout{
+		{"WNODE_HEADER", 48, unsafe.Sizeof(wnodeHeader{})},
+		{"EVENT_TRACE_PROPERTIES", 120, unsafe.Sizeof(eventTraceProperties{})},
+		{"EVENT_TRACE_LOGFILEW", 448, unsafe.Sizeof(eventTraceLogfile{})},
+		{"EVENT_DESCRIPTOR", 16, unsafe.Sizeof(eventDescriptor{})},
+		{"EVENT_HEADER", 80, unsafe.Sizeof(eventHeader{})},
+		{"EVENT_RECORD", 112, unsafe.Sizeof(eventRecord{})},
+	}
+}
+
+// CheckLayouts returns an error naming every structure whose size is wrong.
+func CheckLayouts() error {
+	var bad []string
+	for _, l := range Layouts() {
+		if !l.OK() {
+			bad = append(bad, fmt.Sprintf("%s is %d bytes, expected %d", l.Name, l.Got, l.Want))
+		}
+	}
+	if bad != nil {
+		return fmt.Errorf("%s", strings.Join(bad, "; "))
+	}
+	return nil
+}
+
+// fieldOffsets returns the offset of the fields read from each event, which
+// must match the C layout for the event data to be read correctly.
+func fieldOffsets() []Layout {
+	var r eventRecord
+	base := uintptr(unsafe.Pointer(&r))
+	return []Layout{
+		{"EVENT_RECORD.EventHeader.EventDescriptor.Id", 40, uintptr(unsafe.Pointer(&r.EventHeader.EventDescriptor.Id)) - base},
+		{"EVENT_RECORD.EventHeader.ProcessId", 12, uintptr(unsafe.Pointer(&r.EventHeader.ProcessId)) - base},
+		{"EVENT_RECORD.UserDataLength", 86, uintptr(unsafe.Pointer(&r.UserDataLength)) - base},
+		{"EVENT_RECORD.UserData", 96, uintptr(unsafe.Pointer(&r.UserData)) - base},
+	}
+}
+
+// CheckOffsets returns an error naming every field at the wrong offset.
+func CheckOffsets() error {
+	var bad []string
+	for _, l := range fieldOffsets() {
+		if !l.OK() {
+			bad = append(bad, fmt.Sprintf("%s is at %d, expected %d", l.Name, l.Got, l.Want))
+		}
+	}
+	if bad != nil {
+		return fmt.Errorf("%s", strings.Join(bad, "; "))
+	}
+	return nil
+}
+
+// Offsets returns the checked field offsets, for reporting.
+func Offsets() []Layout { return fieldOffsets() }
+
 // NewSession describes a session. Nothing is started until Start.
 func NewSession(name string, provider windows.GUID, h Handler) *Session {
 	return &Session{name: name, provider: provider, handler: h}
@@ -186,9 +256,11 @@ func (s *Session) stopStale() {
 // Start opens the session and enables the provider. It needs administrator
 // rights: starting a trace session is a privileged operation.
 func (s *Session) Start() error {
-	if unsafe.Sizeof(eventTraceProperties{}) != propsSize {
-		return fmt.Errorf("EVENT_TRACE_PROPERTIES is %d bytes, expected %d",
-			unsafe.Sizeof(eventTraceProperties{}), propsSize)
+	if err := CheckLayouts(); err != nil {
+		return fmt.Errorf("structure layout: %w", err)
+	}
+	if err := CheckOffsets(); err != nil {
+		return fmt.Errorf("field offset: %w", err)
 	}
 	s.stopStale()
 

@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestDecodeKernelNetwork(t *testing.T) {
+	// pid 4660, 66051 bytes, then addresses and ports that must be ignored.
+	payload := []byte{
+		0x34, 0x12, 0x00, 0x00, // pid   = 0x1234
+		0x03, 0x02, 0x01, 0x00, // size  = 0x00010203
+		0xC0, 0xA8, 0x02, 0x02, 0x01, 0xBB, 0x00, 0x00, // ignored
+	}
+	for _, id := range []uint16{10, 26, 42, 58} {
+		pid, size, sent, ok := DecodeKernelNetwork(id, payload)
+		if !ok || !sent || pid != 0x1234 || size != 0x00010203 {
+			t.Errorf("event %d: pid=%d size=%d sent=%v ok=%v", id, pid, size, sent, ok)
+		}
+	}
+	for _, id := range []uint16{11, 27, 43, 59} {
+		_, _, sent, ok := DecodeKernelNetwork(id, payload)
+		if !ok || sent {
+			t.Errorf("event %d should be a receive: sent=%v ok=%v", id, sent, ok)
+		}
+	}
+	for _, id := range []uint16{0, 12, 15, 100} {
+		if _, _, _, ok := DecodeKernelNetwork(id, payload); ok {
+			t.Errorf("event %d should be ignored", id)
+		}
+	}
+	if _, _, _, ok := DecodeKernelNetwork(10, payload[:7]); ok {
+		t.Error("a short payload should be ignored")
+	}
+}
+
 func TestCollector(t *testing.T) {
 	names := map[uint32]string{1: "chrome.exe", 2: "game.exe"}
 	calls := 0

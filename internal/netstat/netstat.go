@@ -10,6 +10,29 @@ import (
 	"sync"
 )
 
+// sentEvents and recvEvents are the event ids of the kernel network
+// provider: TCP then UDP, each over IPv4 then IPv6.
+var kernelNetworkEvents = map[uint16]bool{
+	10: true, 26: true, 42: true, 58: true, // data sent
+	11: false, 27: false, 43: false, 59: false, // data received
+}
+
+// DecodeKernelNetwork reads one event of the Windows kernel network
+// provider. Every one of those events begins with the process id and the
+// number of bytes, which is all that is read: the rest of the payload —
+// addresses and ports — is deliberately ignored. ok is false for any other
+// event, or a payload too short to hold the two fields.
+func DecodeKernelNetwork(id uint16, data []byte) (pid, size uint32, sent, ok bool) {
+	sent, known := kernelNetworkEvents[id]
+	if !known || len(data) < 8 {
+		return 0, 0, false, false
+	}
+	le := func(b []byte) uint32 {
+		return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
+	}
+	return le(data[0:4]), le(data[4:8]), sent, true
+}
+
 // Counts is one application's traffic over a period.
 type Counts struct {
 	BytesSent uint64
