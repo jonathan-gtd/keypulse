@@ -21,10 +21,26 @@ type Config struct {
 	Measurement string        `yaml:"measurement"`
 	PerKey      bool          `yaml:"per_key"`
 	PerApp      bool          `yaml:"per_app"`
+	Shortcuts   bool          `yaml:"shortcuts"`
+	Clipboard   bool          `yaml:"clipboard"`
+	SessionLock bool          `yaml:"session_lock"`
 	MouseDPI    float64       `yaml:"mouse_dpi"`
 	Heatmap     Heatmap       `yaml:"heatmap"`
 	Output      Output        `yaml:"output"`
+	Tray        Tray          `yaml:"tray"`
+	UI          UI            `yaml:"ui"`
 	LogFile     string        `yaml:"log_file"`
+}
+
+// Tray is the notification-area icon.
+type Tray struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// UI is the small local status page.
+type UI struct {
+	Enabled bool   `yaml:"enabled"`
+	Addr    string `yaml:"addr"`
 }
 
 // Heatmap configures cursor and click positions.
@@ -47,8 +63,13 @@ func Default() Config {
 		Interval:    time.Minute,
 		Measurement: "keypulse",
 		PerApp:      true,
+		Shortcuts:   true,
+		Clipboard:   true,
+		SessionLock: true,
 		Heatmap:     Heatmap{Enabled: true, CellSize: 40},
 		Output:      Output{URL: "udp://127.0.0.1:8094", MaxBuffer: 1440},
+		Tray:        Tray{Enabled: true},
+		UI:          UI{Enabled: true, Addr: "127.0.0.1:8099"},
 	}
 }
 
@@ -100,6 +121,9 @@ func (c *Config) finish() error {
 	}
 	if c.Heatmap.CellSize == 0 {
 		c.Heatmap.CellSize = 40
+	}
+	if c.UI.Addr == "" {
+		c.UI.Addr = "127.0.0.1:8099"
 	}
 	switch {
 	case c.Interval < time.Second:

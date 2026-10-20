@@ -8,23 +8,46 @@ interval: 60s
 # Value of the "host" tag. Defaults to the computer name, in lower case.
 # host: my-pc
 
-# Prefix of the measurement names: keypulse, keypulse_keys, keypulse_heatmap.
+# Prefix of the measurement names: keypulse, keypulse_session,
+# keypulse_keys, keypulse_shortcuts, keypulse_heatmap.
 measurement: keypulse
+
+# Attribute keys, clicks and mouse travel to the application in the
+# foreground, and measure how long each one is in front.
+per_app: true
 
 # Count every key separately (keyboard heatmap). Off by default: per-key
 # counts are more revealing than totals.
 per_key: false
 
-# Attribute keys, clicks and mouse travel to the application in the foreground.
-per_app: true
+# Count modifier combinations such as CTRL+C or ALT+TAB. Only the
+# combination is counted — never a sequence of keys.
+shortcuts: true
 
-# Mouse sensor resolution. When set, the distance is also reported in meters.
+# Count how many times the clipboard changes. Its content is never read.
+clipboard: true
+
+# Count session locks and unlocks.
+session_lock: true
+
+# Mouse sensor resolution. When set, the distance the mouse travels on the
+# desk is reported too. The cursor distance on screen (cursor_m) is always
+# reported and needs no setting.
 mouse_dpi: 0
 
 # Where the cursor goes and where you click, on a grid of cell_size pixels.
 heatmap:
   enabled: true
   cell_size: 40
+
+# Icon in the notification area, so keypulse is never running invisibly.
+tray:
+  enabled: true
+
+# Small status page on the loopback interface, opened from the tray icon.
+ui:
+  enabled: true
+  addr: 127.0.0.1:8099
 
 output:
   # udp://127.0.0.1:8094                     Telegraf inputs.socket_listener

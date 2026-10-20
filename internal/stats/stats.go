@@ -1,4 +1,6 @@
-// Package stats accumulates input events between two reports.
+// Package stats accumulates input events between two reports. It records
+// counts and durations only — never which text is typed, nor the order of
+// keys. Per-key counts are opt-in.
 package stats
 
 import (
@@ -53,19 +55,29 @@ type App struct {
 	Keys   uint64
 	Clicks [NumButtons]uint64
 
+	DoubleClicks uint64
+
 	// Wheel movement in notches. High-resolution wheels produce fractions.
 	WheelUp, WheelDown, WheelLeft, WheelRight float64
 
-	// MouseDistance is in sensor counts (pixels for absolute devices such as
-	// tablets or remote desktop sessions).
+	// MouseDistance is in sensor counts (pixels for absolute devices).
 	MouseDistance float64
 
-	// CursorMeters is the distance travelled by the cursor on screen, in
-	// meters, from the physical size of the monitors.
+	// CursorMeters is the cursor travel on screen, in meters.
 	CursorMeters float64
 
 	// ActiveSeconds is the number of distinct seconds with at least one input.
 	ActiveSeconds uint64
+
+	// ForegroundSeconds is the time the app was in the foreground, input or not.
+	ForegroundSeconds uint64
+
+	// Key and click hold times: total duration and number of presses, so an
+	// average can be computed without keeping each press.
+	KeyHoldMillis   float64
+	KeyHoldCount    uint64
+	ClickHoldMillis float64
+	ClickHoldCount  uint64
 }
 
 // TotalClicks returns the number of clicks across all buttons.
@@ -82,22 +94,39 @@ type Snapshot struct {
 	Start, End time.Time
 	Apps       map[string]App    // by foreground application
 	Keys       map[string]uint64 // by key name; nil unless per-key counting is on
+	Shortcuts  map[string]uint64 // by combo name, e.g. "CTRL+C"
 	Heat       map[Cell]uint64   // nil unless the heatmap is on
+
+	// Session-wide, not tied to one application.
+	TypingPeak1s    uint64 // most keys in any one-second window
+	TypingPeak10s   uint64 // most keys in any ten-second window
+	IdleSeconds     uint64 // seconds with no input at all
+	AppSwitches     uint64 // foreground changes
+	ClipboardCopies uint64 // clipboard updates (content never read)
+	Locks           uint64 // session locks
+	Unlocks         uint64 // session unlocks
 }
 
-// Empty reports whether nothing happened during the period.
+// Empty reports whether nothing worth sending happened during the period.
 func (s Snapshot) Empty() bool {
-	return len(s.Apps) == 0 && len(s.Keys) == 0 && len(s.Heat) == 0
+	return len(s.Apps) == 0 && len(s.Keys) == 0 && len(s.Shortcuts) == 0 && len(s.Heat) == 0 &&
+		s.IdleSeconds == 0 && s.AppSwitches == 0 && s.ClipboardCopies == 0 && s.Locks == 0 && s.Unlocks == 0
 }
 
 type appAcc struct {
-	keys       uint64
-	clicks     [NumButtons]uint64
-	wheel      [4]int64 // up, down, right, left, in raw delta units
-	distance   float64
-	cursor     float64
-	active     uint64
-	lastActive int64
+	keys         uint64
+	clicks       [NumButtons]uint64
+	doubleClicks uint64
+	wheel        [4]int64 // up, down, right, left, in raw delta units
+	distance     float64
+	cursor       float64
+	active       uint64
+	lastActive   int64
+	foreground   uint64
+	keyHoldMs    float64
+	keyHoldN     uint64
+	clickHoldMs  float64
+	clickHoldN   uint64
 }
 
 // Counter accumulates events. It is safe for concurrent use.
@@ -113,6 +142,21 @@ type Counter struct {
 	apps  map[string]*appAcc
 	keys  map[string]uint64
 	cells map[Cell]uint64
+
+	shortcuts map[string]uint64
+	switches  uint64
+	clipboard uint64
+	locks     uint64
+	unlocks   uint64
+
+	// Typing peaks, on tumbling windows.
+	sec1Start, sec1Count   uint64
+	sec10Start, sec10Count uint64
+	peak1s, peak10s        uint64
+
+	// Idle: a second with no input increments idle on the next tick.
+	inputThisSecond bool
+	idle            uint64
 }
 
 // NewCounter returns a counter. perKey also counts every key by name;
@@ -131,12 +175,41 @@ func (c *Counter) reset(start time.Time) {
 	c.start = start
 	c.apps = make(map[string]*appAcc)
 	c.cur = nil
+	c.shortcuts = make(map[string]uint64)
+	c.switches, c.clipboard, c.locks, c.unlocks = 0, 0, 0, 0
+	c.peak1s, c.peak10s, c.idle = 0, 0, 0
+	c.sec1Count, c.sec10Count = 0, 0
 	if c.perKey {
 		c.keys = make(map[string]uint64)
 	}
 	if c.heat {
 		c.cells = make(map[Cell]uint64)
 	}
+}
+
+// accRaw returns the current application's accumulator, creating it if needed,
+// without marking activity. Callers hold c.mu.
+func (c *Counter) accRaw() *appAcc {
+	if c.cur == nil {
+		c.cur = c.apps[c.app]
+		if c.cur == nil {
+			c.cur = &appAcc{}
+			c.apps[c.app] = c.cur
+		}
+	}
+	return c.cur
+}
+
+// acc returns the current accumulator and records that an input happened in
+// the current second. Callers hold c.mu.
+func (c *Counter) acc() *appAcc {
+	a := c.accRaw()
+	c.inputThisSecond = true
+	if s := c.now().Unix(); s != a.lastActive {
+		a.lastActive = s
+		a.active++
+	}
+	return a
 }
 
 // SetApp sets the application that receives the following events.
@@ -148,33 +221,60 @@ func (c *Counter) SetApp(name string) {
 	defer c.mu.Unlock()
 	if name != c.app {
 		c.app, c.cur = name, nil
+		c.switches++
 	}
 }
 
-// acc returns the accumulator of the current application and records
-// activity for the current second. Callers hold c.mu.
-func (c *Counter) acc() *appAcc {
-	if c.cur == nil {
-		c.cur = c.apps[c.app]
-		if c.cur == nil {
-			c.cur = &appAcc{}
-			c.apps[c.app] = c.cur
-		}
-	}
-	if s := c.now().Unix(); s != c.cur.lastActive {
-		c.cur.lastActive = s
-		c.cur.active++
-	}
-	return c.cur
-}
-
-// Key records one key press.
+// Key records one key press. perKey adds it to the by-name map, and the
+// press feeds the typing-speed peaks.
 func (c *Counter) Key(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.acc().keys++
 	if c.perKey {
 		c.keys[name]++
+	}
+	c.bumpPeaks()
+}
+
+func (c *Counter) bumpPeaks() {
+	u := uint64(c.now().Unix())
+	if u != c.sec1Start {
+		c.sec1Start, c.sec1Count = u, 0
+	}
+	c.sec1Count++
+	if c.sec1Count > c.peak1s {
+		c.peak1s = c.sec1Count
+	}
+	w := u - u%10
+	if w != c.sec10Start {
+		c.sec10Start, c.sec10Count = w, 0
+	}
+	c.sec10Count++
+	if c.sec10Count > c.peak10s {
+		c.peak10s = c.sec10Count
+	}
+}
+
+// KeyHold records how long a key was held, in milliseconds.
+func (c *Counter) KeyHold(ms float64) {
+	if ms <= 0 || ms > 10000 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a := c.accRaw()
+	a.keyHoldMs += ms
+	a.keyHoldN++
+}
+
+// Shortcut records one modifier combination, e.g. "CTRL+C".
+func (c *Counter) Shortcut(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.inputThisSecond = true
+	if len(c.shortcuts) < 4096 {
+		c.shortcuts[name]++
 	}
 }
 
@@ -186,6 +286,25 @@ func (c *Counter) Click(b Button) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.acc().clicks[b]++
+}
+
+// DoubleClick records one double-click.
+func (c *Counter) DoubleClick() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accRaw().doubleClicks++
+}
+
+// ClickHold records how long a mouse button was held, in milliseconds.
+func (c *Counter) ClickHold(ms float64) {
+	if ms <= 0 || ms > 60000 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a := c.accRaw()
+	a.clickHoldMs += ms
+	a.clickHoldN++
 }
 
 // Wheel records a wheel movement. A positive delta is up (or right when horizontal).
@@ -205,7 +324,7 @@ func (c *Counter) Wheel(delta int, horizontal bool) {
 	c.acc().wheel[i] += int64(delta)
 }
 
-// Move records a mouse movement of distance d.
+// Move records a mouse movement of distance d, in sensor counts.
 func (c *Counter) Move(d float64) {
 	if d <= 0 {
 		return
@@ -222,7 +341,7 @@ func (c *Counter) Cursor(m float64) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.acc().cursor += m
+	c.accRaw().cursor += m
 }
 
 // Heat adds one sample to a heatmap cell.
@@ -235,28 +354,124 @@ func (c *Counter) Heat(cell Cell) {
 	c.cells[cell]++
 }
 
+// Clipboard records one clipboard update. The content is never read.
+func (c *Counter) Clipboard() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clipboard++
+}
+
+// Lock and Unlock record session lock and unlock.
+func (c *Counter) Lock()   { c.mu.Lock(); c.locks++; c.mu.Unlock() }
+func (c *Counter) Unlock() { c.mu.Lock(); c.unlocks++; c.mu.Unlock() }
+
+// Tick is called once a second: it adds a foreground second to the current
+// application and, if nothing was pressed in the past second, an idle second.
+func (c *Counter) Tick() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accRaw().foreground++
+	if !c.inputThisSecond {
+		c.idle++
+	}
+	c.inputThisSecond = false
+}
+
 // Snapshot returns what was counted since the previous snapshot and starts
 // a new period at end.
 func (c *Counter) Snapshot(end time.Time) Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	s := Snapshot{Start: c.start, End: end, Keys: c.keys, Heat: c.cells}
+	s := Snapshot{
+		Start: c.start, End: end, Keys: c.keys, Shortcuts: c.shortcuts, Heat: c.cells,
+		TypingPeak1s: c.peak1s, TypingPeak10s: c.peak10s, IdleSeconds: c.idle,
+		AppSwitches: c.switches, ClipboardCopies: c.clipboard, Locks: c.locks, Unlocks: c.unlocks,
+	}
 	if len(c.apps) > 0 {
 		s.Apps = make(map[string]App, len(c.apps))
 	}
 	for name, a := range c.apps {
 		s.Apps[name] = App{
-			Keys:          a.keys,
-			Clicks:        a.clicks,
-			WheelUp:       float64(a.wheel[0]) / wheelNotch,
-			WheelDown:     float64(a.wheel[1]) / wheelNotch,
-			WheelRight:    float64(a.wheel[2]) / wheelNotch,
-			WheelLeft:     float64(a.wheel[3]) / wheelNotch,
-			MouseDistance: a.distance,
-			CursorMeters:  a.cursor,
-			ActiveSeconds: a.active,
+			Keys:              a.keys,
+			Clicks:            a.clicks,
+			DoubleClicks:      a.doubleClicks,
+			WheelUp:           float64(a.wheel[0]) / wheelNotch,
+			WheelDown:         float64(a.wheel[1]) / wheelNotch,
+			WheelRight:        float64(a.wheel[2]) / wheelNotch,
+			WheelLeft:         float64(a.wheel[3]) / wheelNotch,
+			MouseDistance:     a.distance,
+			CursorMeters:      a.cursor,
+			ActiveSeconds:     a.active,
+			ForegroundSeconds: a.foreground,
+			KeyHoldMillis:     a.keyHoldMs,
+			KeyHoldCount:      a.keyHoldN,
+			ClickHoldMillis:   a.clickHoldMs,
+			ClickHoldCount:    a.clickHoldN,
 		}
 	}
 	c.reset(end)
 	return s
+}
+
+// Session is a running total since keypulse started, for the local UI.
+type Session struct {
+	Since           time.Time
+	Keys            uint64
+	Clicks          uint64
+	DoubleClicks    uint64
+	WheelNotches    float64
+	MouseMeters     float64
+	ActiveSeconds   uint64
+	IdleSeconds     uint64
+	Shortcuts       uint64
+	ClipboardCopies uint64
+	AppSwitches     uint64
+	TypingPeak1s    uint64
+	TopApps         []AppTotal
+}
+
+// AppTotal is one application's running total.
+type AppTotal struct {
+	App           string
+	Keys          uint64
+	Clicks        uint64
+	ActiveSeconds uint64
+}
+
+// Add folds a snapshot into the session totals (for the local UI only).
+func (s *Session) Add(snap Snapshot) {
+	byApp := map[string]*AppTotal{}
+	for _, a := range s.TopApps {
+		t := a
+		byApp[a.App] = &t
+	}
+	for name, a := range snap.Apps {
+		s.Keys += a.Keys
+		s.Clicks += a.TotalClicks()
+		s.DoubleClicks += a.DoubleClicks
+		s.WheelNotches += a.WheelUp + a.WheelDown + a.WheelLeft + a.WheelRight
+		s.MouseMeters += a.CursorMeters
+		s.ActiveSeconds += a.ActiveSeconds
+		t := byApp[name]
+		if t == nil {
+			t = &AppTotal{App: name}
+			byApp[name] = t
+		}
+		t.Keys += a.Keys
+		t.Clicks += a.TotalClicks()
+		t.ActiveSeconds += a.ActiveSeconds
+	}
+	for _, n := range snap.Shortcuts {
+		s.Shortcuts += n
+	}
+	s.IdleSeconds += snap.IdleSeconds
+	s.ClipboardCopies += snap.ClipboardCopies
+	s.AppSwitches += snap.AppSwitches
+	if snap.TypingPeak1s > s.TypingPeak1s {
+		s.TypingPeak1s = snap.TypingPeak1s
+	}
+	s.TopApps = s.TopApps[:0]
+	for _, t := range byApp {
+		s.TopApps = append(s.TopApps, *t)
+	}
 }

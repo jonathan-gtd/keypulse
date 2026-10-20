@@ -28,3 +28,40 @@ func TestKeyID(t *testing.T) {
 		}
 	}
 }
+
+func TestShortcutName(t *testing.T) {
+	down := func(ids ...int) func(int) bool {
+		set := map[int]bool{}
+		for _, id := range ids {
+			set[id] = true
+		}
+		return func(k int) bool { return set[k] }
+	}
+	const (
+		lctrl, rctrl = 0xA2, 0xA3
+		lalt         = 0xA4
+		lwin         = 0x5B
+		lshift       = 0xA0
+	)
+	tests := []struct {
+		name string
+		id   int
+		held func(int) bool
+		want string
+	}{
+		{"copy", 'C', down(lctrl), "CTRL+C"},
+		{"right ctrl is the same combo", 'V', down(rctrl), "CTRL+V"},
+		{"task manager", 0x1B, down(lctrl, lshift), "CTRL+SHIFT+ESC"},
+		{"alt tab", 0x09, down(lalt), "ALT+TAB"},
+		{"win d", 'D', down(lwin), "WIN+D"},
+		{"order is fixed", 'S', down(lshift, lalt, lctrl), "CTRL+ALT+SHIFT+S"},
+		{"shift alone is typing", 'A', down(lshift), ""},
+		{"no modifier", 'A', down(), ""},
+		{"a modifier is not a shortcut", lctrl, down(lctrl), ""},
+	}
+	for _, tt := range tests {
+		if got := shortcutName(tt.id, tt.held); got != tt.want {
+			t.Errorf("%s: shortcutName = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}

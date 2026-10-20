@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keypulse</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --fg: #15181d; --muted: #6b7280;
+    --line: #e4e7ec; --accent: #2f7de1; --ok: #15934b; --warn: #c2410c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --card: #171b21; --fg: #e8eaed; --muted: #949ba6;
+      --line: #262c35; --accent: #5aa2f5; --ok: #34d07f; --warn: #fb923c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .v { font-size: 26px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .v small { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       margin: 28px 0 10px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+          border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { padding: 9px 14px; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  thead th { font-size: 12px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); }
+  tbody tr + tr td { border-top: 1px solid var(--line); }
+  .bar { height: 4px; background: var(--accent); border-radius: 2px; margin-top: 4px; opacity: .85; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; }
+  footer a { color: var(--accent); }
+  code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+  .err { color: var(--warn); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .tag { font-size: 11px; border: 1px solid var(--line); border-radius: 20px; padding: 2px 9px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header><span class="dot"></span><h1>keypulse</h1><span class="sub" id="head"></span></header>
+  <p class="sub" id="meta"></p>
+
+  <div class="grid" id="tiles"></div>
+
+  <h2>Since keypulse started</h2>
+  <table>
+    <thead><tr><th>Application</th><th>Keys</th><th>Clicks</th><th>Active</th></tr></thead>
+    <tbody id="apps"><tr><td colspan="4" class="sub">Nothing counted yet.</td></tr></tbody>
+  </table>
+
+  <footer>
+    Counts only — never what you type. Everything goes to <code id="out">…</code> and nowhere else.
+    <br><a href="https://github.com/jonathan-gtd/keypulse" target="_blank" rel="noopener">github.com/jonathan-gtd/keypulse</a>
+    <span id="ver"></span>
+  </footer>
+</main>
+
+<script>
+const n = v => (v ?? 0).toLocaleString();
+const dur = s => {
+  s = Math.round(s || 0);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? `${h} h ${String(m).padStart(2, "0")}` : m ? `${m} min` : `${s} s`;
+};
+const tile = (k, v, unit) =>
+  `<div class="card"><div class="k">${k}</div><div class="v">${v}${unit ? `<small>${unit}</small>` : ""}</div></div>`;
+
+async function refresh() {
+  let d;
+  try {
+    d = await (await fetch("api/stats", { cache: "no-store" })).json();
+  } catch {
+    document.getElementById("head").innerHTML = '<span class="err">agent unreachable</span>';
+    return;
+  }
+  document.getElementById("head").textContent = `running for ${dur(d.uptime_s)}`;
+  document.getElementById("meta").innerHTML =
+    `host <code>${d.host}</code> · every ${d.interval} · last send ${d.last_send || "—"}` +
+    (d.last_error ? ` · <span class="err">${d.last_error}</span>` : "") +
+    `<div class="tags">${(d.tracking || []).map(t => `<span class="tag">${t}</span>`).join("")}</div>`;
+  document.getElementById("out").textContent = d.output;
+  document.getElementById("ver").textContent = d.version ? ` · v${d.version}` : "";
+
+  document.getElementById("tiles").innerHTML = [
+    tile("Keys", n(d.keys)),
+    tile("Clicks", n(d.clicks)),
+    tile("Double-clicks", n(d.double_clicks)),
+    tile("Shortcuts", n(d.shortcuts)),
+    tile("Cursor", (d.mouse_m || 0).toFixed(1), "m"),
+    tile("Wheel", n(d.wheel_notches), "notches"),
+    tile("Active", dur(d.active_s)),
+    tile("Idle", dur(d.idle_s)),
+    tile("Peak", n(d.typing_peak_1s), "keys/s"),
+    tile("App switches", n(d.app_switches)),
+    tile("Clipboard", n(d.clipboard_copies)),
+    tile("Points sent", n(d.sent_points)),
+  ].join("");
+
+  const apps = (d.apps || []).sort((a, b) => b.active_s - a.active_s).slice(0, 12);
+  const max = Math.max(1, ...apps.map(a => a.active_s));
+  document.getElementById("apps").innerHTML = apps.length
+    ? apps.map(a => `<tr><td>${a.app}<div class="bar" style="width:${a.active_s / max * 100}%"></div></td>
+        <td>${n(a.keys)}</td><td>${n(a.clicks)}</td><td>${dur(a.active_s)}</td></tr>`).join("")
+    : '<tr><td colspan="4" class="sub">Nothing counted yet.</td></tr>';
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

@@ -39,6 +39,13 @@ var (
 	procGetMonitorInfoW         = user32.NewProc("GetMonitorInfoW")
 	procGetModuleHandleW        = kernel32.NewProc("GetModuleHandleW")
 
+	procAddClipboardFormatListener    = user32.NewProc("AddClipboardFormatListener")
+	procRemoveClipboardFormatListener = user32.NewProc("RemoveClipboardFormatListener")
+
+	wtsapi32                             = windows.NewLazySystemDLL("wtsapi32.dll")
+	procWTSRegisterSessionNotification   = wtsapi32.NewProc("WTSRegisterSessionNotification")
+	procWTSUnRegisterSessionNotification = wtsapi32.NewProc("WTSUnRegisterSessionNotification")
+
 	gdi32             = windows.NewLazySystemDLL("gdi32.dll")
 	procCreateDCW     = gdi32.NewProc("CreateDCW")
 	procGetDeviceCaps = gdi32.NewProc("GetDeviceCaps")
@@ -46,11 +53,17 @@ var (
 )
 
 const (
-	wmEndSession    = 0x0016
-	wmQuit          = 0x0012
-	wmDisplayChange = 0x007E
-	wmInput         = 0x00FF
-	wmTimer         = 0x0113
+	wmEndSession       = 0x0016
+	wmQuit             = 0x0012
+	wmDisplayChange    = 0x007E
+	wmInput            = 0x00FF
+	wmTimer            = 0x0113
+	wmClipboardUpdate  = 0x031D
+	wmWTSSessionChange = 0x02B1
+
+	wtsSessionLock       = 0x7
+	wtsSessionUnlock     = 0x8
+	notifyForThisSession = 0
 
 	wsPopup        = 0x80000000
 	wsExToolWindow = 0x00000080
@@ -75,6 +88,13 @@ const (
 	riMouseHWheel     = 0x0800
 	riMouseAnyDown    = riMouseLeftDown | riMouseRightDown | riMouseMiddleDown | riMouseX1Down | riMouseX2Down
 
+	riMouseLeftUp   = 0x0002
+	riMouseRightUp  = 0x0008
+	riMouseMiddleUp = 0x0020
+	riMouseX1Up     = 0x0080
+	riMouseX2Up     = 0x0200
+	riMouseAnyUp    = riMouseLeftUp | riMouseRightUp | riMouseMiddleUp | riMouseX1Up | riMouseX2Up
+
 	smCxScreen        = 0
 	smCyScreen        = 1
 	smXVirtualScreen  = 76
@@ -87,6 +107,12 @@ const (
 
 	cursorTimerID = 1
 	cursorTimerMs = 100
+	tickTimerID   = 2
+	tickTimerMs   = 1000
+
+	// Two left clicks closer than this count as a double-click. Matches the
+	// usual Windows default.
+	doubleClickWindow = 400 * time.Millisecond
 
 	// The cursor path is sampled at most this often: enough for its length,
 	// and cheap with mice polling at several kHz.
@@ -206,7 +232,10 @@ type listener struct {
 	c   *stats.Counter
 	opt Options
 
-	down [numpadEnter + 1]bool
+	down     [numpadEnter + 1]bool
+	downAt   [numpadEnter + 1]time.Time
+	btnDown  [stats.NumButtons]time.Time
+	lastLeft time.Time
 
 	absX, absY float64
 	haveAbs    bool
@@ -271,6 +300,22 @@ func (l *listener) loop(tidc chan<- uint32) error {
 		}
 	}
 
+	if r, _, err := procSetTimer.Call(hwnd, tickTimerID, tickTimerMs, 0); r == 0 {
+		return fmt.Errorf("SetTimer: %w", err)
+	}
+	if l.opt.Clipboard {
+		if r, _, err := procAddClipboardFormatListener.Call(hwnd); r == 0 {
+			return fmt.Errorf("AddClipboardFormatListener: %w", err)
+		}
+		defer procRemoveClipboardFormatListener.Call(hwnd)
+	}
+	if l.opt.Session {
+		if r, _, err := procWTSRegisterSessionNotification.Call(hwnd, notifyForThisSession); r == 0 {
+			return fmt.Errorf("WTSRegisterSessionNotification: %w", err)
+		}
+		defer procWTSUnRegisterSessionNotification.Call(hwnd)
+	}
+
 	tidc <- windows.GetCurrentThreadId()
 	var m msg
 	for {
@@ -290,7 +335,24 @@ func (l *listener) wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 	case wmInput:
 		l.rawInput(lParam)
 	case wmTimer:
-		l.sampleCursor()
+		switch wParam {
+		case cursorTimerID:
+			l.sampleCursor()
+		case tickTimerID:
+			l.c.Tick()
+		}
+		return 0
+	case wmClipboardUpdate:
+		// Only that the clipboard changed; its content is never read.
+		l.c.Clipboard()
+		return 0
+	case wmWTSSessionChange:
+		switch wParam {
+		case wtsSessionLock:
+			l.c.Lock()
+		case wtsSessionUnlock:
+			l.c.Unlock()
+		}
 		return 0
 	case wmEndSession:
 		if wParam != 0 && l.opt.OnEndSession != nil {
@@ -329,35 +391,62 @@ func (l *listener) keyboard(k *rawKeyboard) {
 	if id < 0 || id >= len(l.down) {
 		return
 	}
+	now := time.Now()
 	if k.flags&riKeyBreak != 0 {
+		if l.down[id] {
+			l.c.KeyHold(float64(now.Sub(l.downAt[id]).Microseconds()) / 1000)
+		}
 		l.down[id] = false
 		return
 	}
 	if l.down[id] { // auto-repeat while the key is held
 		return
 	}
-	l.down[id] = true
+	l.down[id], l.downAt[id] = true, now
 	l.c.Key(keyNames[id])
+	if combo := shortcutName(id, func(k int) bool { return l.down[k] }); combo != "" {
+		l.c.Shortcut(combo)
+	}
+}
+
+// mouseButtons maps the raw input flags of each button.
+var mouseButtons = []struct {
+	down, up uint16
+	button   stats.Button
+}{
+	{riMouseLeftDown, riMouseLeftUp, stats.Left},
+	{riMouseRightDown, riMouseRightUp, stats.Right},
+	{riMouseMiddleDown, riMouseMiddleUp, stats.Middle},
+	{riMouseX1Down, riMouseX1Up, stats.X1},
+	{riMouseX2Down, riMouseX2Up, stats.X2},
 }
 
 func (l *listener) mouse(m *rawMouse) {
 	f := m.buttonFlags
+	if f&(riMouseAnyDown|riMouseAnyUp) != 0 {
+		now := time.Now()
+		for _, b := range mouseButtons {
+			switch {
+			case f&b.down != 0:
+				l.c.Click(b.button)
+				l.btnDown[b.button] = now
+				if b.button == stats.Left {
+					if !l.lastLeft.IsZero() && now.Sub(l.lastLeft) <= doubleClickWindow {
+						l.c.DoubleClick()
+						l.lastLeft = time.Time{} // a triple click is not two doubles
+					} else {
+						l.lastLeft = now
+					}
+				}
+			case f&b.up != 0:
+				if t := l.btnDown[b.button]; !t.IsZero() {
+					l.c.ClickHold(float64(now.Sub(t).Microseconds()) / 1000)
+					l.btnDown[b.button] = time.Time{}
+				}
+			}
+		}
+	}
 	if f&riMouseAnyDown != 0 {
-		if f&riMouseLeftDown != 0 {
-			l.c.Click(stats.Left)
-		}
-		if f&riMouseRightDown != 0 {
-			l.c.Click(stats.Right)
-		}
-		if f&riMouseMiddleDown != 0 {
-			l.c.Click(stats.Middle)
-		}
-		if f&riMouseX1Down != 0 {
-			l.c.Click(stats.X1)
-		}
-		if f&riMouseX2Down != 0 {
-			l.c.Click(stats.X2)
-		}
 		if l.opt.Heatmap {
 			if p, ok := cursorPos(); ok {
 				x, y := l.cell(p)

@@ -1,6 +1,9 @@
 package input
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // numpadEnter is a pseudo key id: Windows reports both Enter keys as VK_RETURN.
 const numpadEnter = 256
@@ -77,6 +80,40 @@ func keyName(id int) string {
 		return name
 	}
 	return fmt.Sprintf("VK_%02X", vk)
+}
+
+// modifiers, in the order they appear in a combo name. CTRL, ALT and WIN
+// make a shortcut; SHIFT only decorates one, since shift alone is typing.
+var modifierKeys = []struct {
+	name    string
+	ids     [2]int
+	inCombo bool
+}{
+	{"CTRL", [2]int{0xA2, 0xA3}, true},
+	{"ALT", [2]int{0xA4, 0xA5}, true},
+	{"WIN", [2]int{0x5B, 0x5C}, true},
+	{"SHIFT", [2]int{0xA0, 0xA1}, false},
+}
+
+// shortcutName names the combination being pressed, e.g. "CTRL+SHIFT+ESC".
+// It returns "" when id is itself a modifier, or when no CTRL, ALT or WIN is
+// held. Only the combination is named: no sequence of keys is ever kept.
+func shortcutName(id int, isDown func(int) bool) string {
+	var parts []string
+	real := false
+	for _, m := range modifierKeys {
+		if id == m.ids[0] || id == m.ids[1] {
+			return ""
+		}
+		if isDown(m.ids[0]) || isDown(m.ids[1]) {
+			parts = append(parts, m.name)
+			real = real || m.inCombo
+		}
+	}
+	if !real || id < 0 || id >= len(keyNames) {
+		return ""
+	}
+	return strings.Join(append(parts, keyNames[id]), "+")
 }
 
 // keyNames is filled once so that a key press never allocates.

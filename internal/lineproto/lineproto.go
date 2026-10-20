@@ -21,7 +21,9 @@ type Options struct {
 // Encode returns the snapshot as line protocol, one line per point:
 //
 //	keypulse,host=mars,app=game.exe keys=12i,clicks=3i,... <ts>
+//	keypulse_session,host=mars idle_s=12i,typing_peak_1s=7i,... <ts>
 //	keypulse_keys,host=mars,key=A count=4i <ts>
+//	keypulse_shortcuts,host=mars,combo=CTRL+C count=2i <ts>
 //	keypulse_heatmap,host=mars,kind=move,x=12,y=7 count=9i <ts>
 func Encode(o Options, s stats.Snapshot) []byte {
 	m := o.Measurement
@@ -47,6 +49,7 @@ func Encode(o Options, s stats.Snapshot) []byte {
 		for i, n := range a.Clicks {
 			writeInt(&b, "clicks_"+stats.ButtonNames[i], n, false)
 		}
+		writeInt(&b, "double_clicks", a.DoubleClicks, false)
 		writeFloat(&b, "wheel_up", a.WheelUp)
 		writeFloat(&b, "wheel_down", a.WheelDown)
 		writeFloat(&b, "wheel_left", a.WheelLeft)
@@ -57,8 +60,25 @@ func Encode(o Options, s stats.Snapshot) []byte {
 		}
 		writeFloat(&b, "cursor_m", round(a.CursorMeters, 4))
 		writeInt(&b, "active_s", a.ActiveSeconds, false)
+		writeInt(&b, "foreground_s", a.ForegroundSeconds, false)
+		writeFloat(&b, "key_hold_ms_sum", round(a.KeyHoldMillis, 1))
+		writeInt(&b, "key_hold_n", a.KeyHoldCount, false)
+		writeFloat(&b, "click_hold_ms_sum", round(a.ClickHoldMillis, 1))
+		writeInt(&b, "click_hold_n", a.ClickHoldCount, false)
 		b.WriteString(ts)
 	}
+
+	b.WriteString(escapeMeasurement(m + "_session"))
+	b.WriteString(host)
+	b.WriteByte(' ')
+	writeInt(&b, "typing_peak_1s", s.TypingPeak1s, true)
+	writeInt(&b, "typing_peak_10s", s.TypingPeak10s, false)
+	writeInt(&b, "idle_s", s.IdleSeconds, false)
+	writeInt(&b, "app_switches", s.AppSwitches, false)
+	writeInt(&b, "clipboard_copies", s.ClipboardCopies, false)
+	writeInt(&b, "locks", s.Locks, false)
+	writeInt(&b, "unlocks", s.Unlocks, false)
+	b.WriteString(ts)
 
 	for _, key := range sortedKeys(s.Keys) {
 		b.WriteString(escapeMeasurement(m + "_keys"))
@@ -67,6 +87,16 @@ func Encode(o Options, s stats.Snapshot) []byte {
 		b.WriteString(escapeTag(key))
 		b.WriteByte(' ')
 		writeInt(&b, "count", s.Keys[key], true)
+		b.WriteString(ts)
+	}
+
+	for _, combo := range sortedKeys(s.Shortcuts) {
+		b.WriteString(escapeMeasurement(m + "_shortcuts"))
+		b.WriteString(host)
+		b.WriteString(",combo=")
+		b.WriteString(escapeTag(combo))
+		b.WriteByte(' ')
+		writeInt(&b, "count", s.Shortcuts[combo], true)
 		b.WriteString(ts)
 	}
 

@@ -68,10 +68,12 @@ begin
     'You can change these later in ' + ConfigPath + '.', False, False);
   OptionsPage.Add('Break down activity by application');
   OptionsPage.Add('Cursor and click heatmap');
+  OptionsPage.Add('Count shortcuts (CTRL+C, ALT+TAB, ...)');
   OptionsPage.Add('Count each key separately (keyboard heatmap)');
   OptionsPage.Values[0] := True;
   OptionsPage.Values[1] := True;
-  OptionsPage.Values[2] := False;
+  OptionsPage.Values[2] := True;
+  OptionsPage.Values[3] := False;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -100,16 +102,22 @@ begin
   if (CurStep = ssPostInstall) and not FileExists(ConfigPath) then
   begin
     ForceDirectories(ExtractFileDir(ConfigPath));
-    SetArrayLength(Lines, 9);
+    SetArrayLength(Lines, 15);
     Lines[0] := '# keypulse configuration. All settings: ' + ExpandConstant('{app}') + '\config.example.yaml';
     Lines[1] := 'interval: 60s';
     Lines[2] := 'per_app: ' + YesNo(OptionsPage.Values[0]);
-    Lines[3] := 'per_key: ' + YesNo(OptionsPage.Values[2]);
-    Lines[4] := 'heatmap:';
-    Lines[5] := '  enabled: ' + YesNo(OptionsPage.Values[1]);
-    Lines[6] := 'output:';
-    Lines[7] := '  url: "' + OutputPage.Values[0] + '"';
-    Lines[8] := '';
+    Lines[3] := 'per_key: ' + YesNo(OptionsPage.Values[3]);
+    Lines[4] := 'shortcuts: ' + YesNo(OptionsPage.Values[2]);
+    Lines[5] := 'clipboard: true';
+    Lines[6] := 'session_lock: true';
+    Lines[7] := 'heatmap:';
+    Lines[8] := '  enabled: ' + YesNo(OptionsPage.Values[1]);
+    Lines[9] := 'tray:';
+    Lines[10] := '  enabled: true';
+    Lines[11] := 'ui:';
+    Lines[12] := '  addr: 127.0.0.1:8099';
+    Lines[13] := 'output:';
+    Lines[14] := '  url: "' + OutputPage.Values[0] + '"';
     SaveStringsToUTF8File(ConfigPath, Lines, False);
   end;
 end;

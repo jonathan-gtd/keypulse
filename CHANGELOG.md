@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+Added
+- **Notification-area icon**, with a menu to open the statistics or quit, so keypulse is never running invisibly.
+- **Local status page** (`http://127.0.0.1:8099`): live totals since start, per-application table, where the data goes and what is being counted.
+- **Shortcuts**: a counter per combination, such as `CTRL+C` or `ALT+TAB`. The combination is named; no key sequence is kept.
+- **Key and click hold times** (total and count, so an average can be charted).
+- **Double-clicks**.
+- **Typing-speed peaks**: most keys in any one-second and ten-second window.
+- **Foreground time per application**, counted even when nothing is pressed.
+- **Idle seconds**, **application switches**, **clipboard-change count** (content never read) and **session lock/unlock**.
+- New measurements `keypulse_session` and `keypulse_shortcuts`.
+
 ## [0.2.0] - 2026-10-20
 
 - `cursor_m`: on-screen cursor travel in meters, from the physical size of the monitors — no DPI to configure.

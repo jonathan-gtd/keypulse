@@ -1,8 +1,10 @@
 // Command keypulse counts keyboard and mouse activity and sends it to
-// Telegraf or InfluxDB as line protocol.
+// Telegraf or InfluxDB as line protocol. It counts only: no typed text and
+// no key sequence is ever kept or sent.
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,16 +24,98 @@ import (
 	"github.com/jonathan-gtd/keypulse/internal/lineproto"
 	"github.com/jonathan-gtd/keypulse/internal/sink"
 	"github.com/jonathan-gtd/keypulse/internal/stats"
+	"github.com/jonathan-gtd/keypulse/internal/tray"
+	"github.com/jonathan-gtd/keypulse/internal/ui"
 	"github.com/jonathan-gtd/keypulse/internal/winutil"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	newline = []byte{'\n'}
+)
 
 func main() {
 	if err := run(); err != nil {
 		log.Printf("fatal: %v", err)
 		os.Exit(1)
 	}
+}
+
+// agent holds the running state shared with the local status page.
+type agent struct {
+	cfg     config.Config
+	counter *stats.Counter
+	out     sink.Sink
+	enc     lineproto.Options
+
+	mu      sync.Mutex
+	session stats.Session
+	sent    uint64
+	last    time.Time
+	lastErr string
+}
+
+// flush turns the period into points and sends them.
+func (a *agent) flush(end time.Time) {
+	s := a.counter.Snapshot(end)
+	if s.Empty() {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.session.Add(s)
+	payload := lineproto.Encode(a.enc, s)
+	if err := a.out.Send(payload); err != nil {
+		a.lastErr = err.Error()
+		log.Printf("send: %v", err)
+		return
+	}
+	a.lastErr = ""
+	a.last = end
+	a.sent += uint64(bytes.Count(payload, newline))
+}
+
+func (a *agent) status() ui.Status {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st := ui.Status{
+		Version: version, Host: a.cfg.Host, Output: a.cfg.Output.URL,
+		Interval: a.cfg.Interval.String(), Since: a.session.Since.Format(time.RFC3339),
+		UptimeSec: int64(time.Since(a.session.Since).Seconds()), Tracking: a.tracking(),
+		SentPoints: a.sent, LastError: a.lastErr,
+		Keys: a.session.Keys, Clicks: a.session.Clicks, DoubleClicks: a.session.DoubleClicks,
+		WheelNotches: int64(a.session.WheelNotches), MouseMeters: a.session.MouseMeters,
+		ActiveSeconds: a.session.ActiveSeconds, IdleSeconds: a.session.IdleSeconds,
+		Shortcuts: a.session.Shortcuts, ClipboardCopies: a.session.ClipboardCopies,
+		AppSwitches: a.session.AppSwitches, TypingPeak1s: a.session.TypingPeak1s,
+	}
+	if !a.last.IsZero() {
+		st.LastSend = a.last.Format("15:04:05")
+	}
+	for _, t := range a.session.TopApps {
+		st.Apps = append(st.Apps, ui.AppRow{App: t.App, Keys: t.Keys, Clicks: t.Clicks, ActiveSeconds: t.ActiveSeconds})
+	}
+	return st
+}
+
+func (a *agent) tracking() []string {
+	t := []string{"keys", "clicks", "wheel", "mouse"}
+	for _, o := range []struct {
+		on   bool
+		name string
+	}{
+		{a.cfg.PerApp, "per application"},
+		{a.cfg.PerKey, "per key"},
+		{a.cfg.Shortcuts, "shortcuts"},
+		{a.cfg.Heatmap.Enabled, "heatmap"},
+		{a.cfg.Clipboard, "clipboard count"},
+		{a.cfg.SessionLock, "lock / unlock"},
+	} {
+		if o.on {
+			t = append(t, o.name)
+		}
+	}
+	return t
 }
 
 func run() error {
@@ -75,51 +160,88 @@ func run() error {
 	}
 	defer out.Close()
 
-	counter := stats.NewCounter(cfg.PerKey, cfg.Heatmap.Enabled)
-	enc := lineproto.Options{Measurement: cfg.Measurement, Host: cfg.Host, MouseDPI: cfg.MouseDPI}
-	var sendMu sync.Mutex
-	flush := func(end time.Time) {
-		s := counter.Snapshot(end)
-		if s.Empty() {
-			return
-		}
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		if err := out.Send(lineproto.Encode(enc, s)); err != nil {
-			log.Printf("send: %v", err)
+	a := &agent{
+		cfg:     cfg,
+		counter: stats.NewCounter(cfg.PerKey, cfg.Heatmap.Enabled),
+		out:     out,
+		enc:     lineproto.Options{Measurement: cfg.Measurement, Host: cfg.Host, MouseDPI: cfg.MouseDPI},
+	}
+	a.session.Since = time.Now()
+
+	// The status page is a convenience: a busy port must not stop counting.
+	var page *ui.Server
+	if cfg.UI.Enabled {
+		if page, err = ui.New(cfg.UI.Addr, a.status); err != nil {
+			log.Printf("status page disabled: %v", err)
+			page = nil
+		} else {
+			defer page.Close()
+			go func() {
+				if err := page.Serve(); err != nil {
+					log.Printf("status page: %v", err)
+				}
+			}()
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	inputErr := make(chan error, 1)
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
 	go func() {
-		inputErr <- input.Run(ctx, counter, input.Options{
+		err := input.Run(ctx, a.counter, input.Options{
 			PerApp:       cfg.PerApp,
 			Heatmap:      cfg.Heatmap.Enabled,
 			CellSize:     cfg.Heatmap.CellSize,
-			OnEndSession: func() { flush(time.Now()) },
+			Clipboard:    cfg.Clipboard,
+			Session:      cfg.SessionLock,
+			OnEndSession: func() { a.flush(time.Now()) },
 		})
+		if err != nil {
+			log.Printf("input: %v", err)
+		}
+		cancel()
 	}()
+	go a.loop(ctx)
 
-	log.Printf("keypulse %s: host=%s output=%s interval=%s per_key=%t per_app=%t heatmap=%t",
-		version, cfg.Host, cfg.Output.URL, cfg.Interval, cfg.PerKey, cfg.PerApp, cfg.Heatmap.Enabled)
+	url := ""
+	if page != nil {
+		url = page.URL()
+	}
+	log.Printf("keypulse %s: host=%s output=%s interval=%s tracking=%s page=%s",
+		version, cfg.Host, cfg.Output.URL, cfg.Interval, strings.Join(a.tracking(), ", "), url)
 
+	if cfg.Tray.Enabled {
+		go func() {
+			<-ctx.Done()
+			tray.Quit()
+		}()
+		tray.Run(tray.Options{
+			Tooltip:  "keypulse — counting keyboard and mouse activity",
+			StatsURL: url,
+			OnQuit:   cancel,
+		}, nil)
+		cancel()
+	} else {
+		<-ctx.Done()
+	}
+
+	a.flush(time.Now())
+	return nil
+}
+
+// loop sends a report at every interval, aligned on the clock.
+func (a *agent) loop(ctx context.Context) {
 	for {
-		// Reports are aligned on the clock: every minute at :00 with the default interval.
-		next := time.Now().Truncate(cfg.Interval).Add(cfg.Interval)
+		next := time.Now().Truncate(a.cfg.Interval).Add(a.cfg.Interval)
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			flush(time.Now())
-			return nil
-		case err := <-inputErr:
-			timer.Stop()
-			flush(time.Now())
-			return fmt.Errorf("input: %w", err)
+			return
 		case <-timer.C:
-			flush(next)
+			a.flush(next)
 		}
 	}
 }

@@ -4,7 +4,7 @@
 
 ### Keyboard and mouse statistics for your own time-series database
 
-Keys, clicks, scrolling, mouse travel, per-application breakdown and heatmaps —
+Keys, clicks, shortcuts, scrolling, mouse travel, per-application breakdown and heatmaps —
 sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cloud.
 
 [![Release](https://img.shields.io/github/v/release/jonathan-gtd/keypulse?color=41BDF5)](https://github.com/jonathan-gtd/keypulse/releases/latest) [![CI](https://img.shields.io/github/actions/workflow/status/jonathan-gtd/keypulse/ci.yaml?branch=main&label=tests)](https://github.com/jonathan-gtd/keypulse/actions/workflows/ci.yaml) [![License](https://img.shields.io/github/license/jonathan-gtd/keypulse?color=lightgrey)](LICENSE)
@@ -17,9 +17,11 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 
 [WhatPulse](https://whatpulse.org) and [MouseTracks](https://github.com/huntfx/MouseTracks) show how you use your keyboard and mouse, but keep the data in their own app or cloud. keypulse is a small Windows agent that does the counting and hands the numbers to the stack you already run — Telegraf, InfluxDB, TimescaleDB, Grafana.
 
-- ⌨️ **Keys, clicks, wheel, mouse distance and active time**, every minute — cursor travel in real meters, no DPI to enter.
-- 🪟 **Per application** — how much you type in your editor, click in your game.
-- 🔥 **Heatmaps** — where the cursor goes and where you click, and (opt-in) which keys you use.
+- ⌨️ **Keys, clicks, shortcuts, wheel, mouse travel and active time**, every minute — cursor distance in real meters, no DPI to enter.
+- 🪟 **Per application** — how much you type in your editor, click in your game, and how long each one is in front.
+- 🔥 **Heatmaps** — where the cursor goes, where you click, and (opt-in) which keys you use.
+- 📈 **More than totals** — typing-speed peaks, key and click hold times, double-clicks, idle time, application switches.
+- 🔔 **A tray icon and a local status page**, so it is never running invisibly.
 - 🎮 **Built not to cost a frame** — no input hook, below-normal priority, efficiency cores. [Details](#performance)
 - 🔒 **Counts only** — never what you type. [Details](#privacy)
 
@@ -41,6 +43,8 @@ sent to Telegraf or InfluxDB, charted in Grafana. Like WhatPulse, without the cl
 
 From there, any Telegraf output works: InfluxDB, PostgreSQL/TimescaleDB, MQTT, Prometheus… See [docs/telegraf.md](docs/telegraf.md) for a TimescaleDB example. keypulse can also post to InfluxDB 2 directly (`output.url` in the configuration).
 
+**3. Click the tray icon** to open the status page and check the numbers are moving.
+
 ---
 
 ## Configuration
@@ -52,14 +56,19 @@ From there, any Telegraf output works: InfluxDB, PostgreSQL/TimescaleDB, MQTT, P
 | `interval` | `60s` | How often counters are sent, aligned on the clock |
 | `per_app` | `true` | Break activity down by foreground application |
 | `per_key` | `false` | Count every key separately |
+| `shortcuts` | `true` | Count modifier combinations such as `CTRL+C` |
+| `clipboard` | `true` | Count clipboard changes (content never read) |
+| `session_lock` | `true` | Count session locks and unlocks |
 | `heatmap.enabled` | `true` | Cursor and click positions |
 | `heatmap.cell_size` | `40` | Heatmap grid, in pixels |
-| `mouse_dpi` | `0` | Your mouse DPI, to also get the distance the mouse travels on the desk (`mouse_m`) |
+| `mouse_dpi` | `0` | Your mouse DPI, to also get the distance it travels on the desk (`mouse_m`) |
+| `tray.enabled` | `true` | Icon in the notification area |
+| `ui.enabled` / `ui.addr` | `true` / `127.0.0.1:8099` | Local status page |
 | `output.url` | `udp://127.0.0.1:8094` | `udp://` (Telegraf), `http(s)://` (Telegraf listener, InfluxDB 2) |
 | `output.token` | | InfluxDB token |
 | `host` | computer name | Value of the `host` tag |
 
-Restart keypulse after a change: end it in Task Manager, then start it again from the Start menu.
+Restart keypulse after a change: quit it from the tray icon, then start it again from the Start menu.
 
 ---
 
@@ -68,16 +77,22 @@ Restart keypulse after a change: end it in Task Manager, then start it again fro
 Line protocol, one batch per interval, nothing sent when nothing happened:
 
 ```
-keypulse,host=pc,app=code.exe keys=412i,clicks=37i,clicks_left=31i,clicks_right=6i,clicks_middle=0i,clicks_x1=0i,clicks_x2=0i,wheel_up=24,wheel_down=31,wheel_left=0,wheel_right=0,mouse_distance=48211.5,cursor_m=11.2731,active_s=58i 1760000000000000000
+keypulse,host=pc,app=code.exe keys=412i,clicks=37i,...,cursor_m=11.2731,active_s=58i,foreground_s=60i 1760000000000000000
+keypulse_session,host=pc typing_peak_1s=7i,typing_peak_10s=48i,idle_s=12i,app_switches=4i,... 1760000000000000000
 keypulse_keys,host=pc,key=SPACE count=61i 1760000000000000000
+keypulse_shortcuts,host=pc,combo=CTRL+C count=5i 1760000000000000000
 keypulse_heatmap,host=pc,kind=click,x=31,y=17 count=4i 1760000000000000000
 ```
 
 | Measurement | Tags | Fields |
 |---|---|---|
-| `keypulse` | `host`, `app` | `keys`, `clicks`, `clicks_<button>`, `wheel_up/down/left/right` (notches), `mouse_distance` (sensor counts), `cursor_m` (on-screen cursor travel, meters), `mouse_m` (if `mouse_dpi` is set), `active_s` |
+| `keypulse` | `host`, `app` | `keys`, `clicks`, `clicks_<button>`, `double_clicks`, `wheel_up/down/left/right` (notches), `mouse_distance` (sensor counts), `cursor_m` (on-screen cursor travel, meters), `mouse_m` (if `mouse_dpi` is set), `active_s`, `foreground_s`, `key_hold_ms_sum`, `key_hold_n`, `click_hold_ms_sum`, `click_hold_n` |
+| `keypulse_session` | `host` | `typing_peak_1s`, `typing_peak_10s`, `idle_s`, `app_switches`, `clipboard_copies`, `locks`, `unlocks` |
 | `keypulse_keys` | `host`, `key` | `count` — only with `per_key` |
+| `keypulse_shortcuts` | `host`, `combo` | `count` — only with `shortcuts` |
 | `keypulse_heatmap` | `host`, `kind` (`move`/`click`), `x`, `y` | `count` — cells from the top-left corner of the desktop |
+
+Hold times are reported as a total and a count, so an average can be charted without keeping each press.
 
 `cursor_m` is measured like WhatPulse does it: the distance the cursor covers on screen, converted to meters with the physical size Windows reads from each monitor (EDID). Mouse DPI cannot be read by software, so this needs no setting. Games that capture the mouse confine the cursor; keypulse detects it and adds neither cursor distance nor heatmap samples while it lasts — `mouse_distance` keeps counting.
 
@@ -94,13 +109,20 @@ keypulse is meant to run while you play.
 - **No polling.** The foreground application comes from a Windows event; the cursor position is read at most 10 times a second, and only after the mouse moved.
 - **No allocation per event**, one small network packet per interval.
 
-Measured on an i9-14900KF over 30 seconds of ordinary mouse use, start-up included: 0.6 % of one core (0.02 % of the whole CPU) and 48 MB of memory.
+Measured on an i9-14900KF over 30 seconds of ordinary mouse use, start-up included: 0.6 % of one core (0.02 % of the whole CPU) and about 17 MB of memory.
 
 ---
 
 ## Privacy
 
-keypulse counts; it does not log. Totals never say which keys were pressed. `per_key` records how many times each key was pressed per interval — never their order — but on short intervals that can still hint at what was typed, which is why it is off by default. Everything goes only to the address you configure.
+keypulse counts; it does not log.
+
+- **No typed text, ever**, and no key sequence: the order of presses is never kept, only how many.
+- `per_key` records how many times each key was pressed per interval — never their order — but on short intervals that can still hint at what was typed, which is why it is **off by default**.
+- `shortcuts` names a combination (`CTRL+C`), not what it acted on.
+- `clipboard` counts how many times the clipboard changed. **The clipboard is never read.**
+- The tray icon and the status page are on by default on purpose: you can always see that it is running and exactly what it is counting.
+- Everything goes only to the address you configure. keypulse talks to nothing else.
 
 ---
 
